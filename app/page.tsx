@@ -22,6 +22,33 @@ const blank=():Log=>({
  steps:null,water_oz:null,strength:false,cardio_minutes:0,alcohol_drinks:0,notes:''
 })
 
+const workouts={
+ 1:{name:'Full Body A',focus:'Squat + horizontal push/pull',exercises:[
+  ['Goblet squat','3','8–12'],['Dumbbell Romanian deadlift','3','8–12'],
+  ['Dumbbell bench/floor press','3','8–12'],['One-arm dumbbell row','3','10–12/side'],
+  ['Dumbbell lateral raise','2','12–15'],['Kettlebell swings','3','15'],['Plank','2','30–60 sec']
+ ]},
+ 3:{name:'Full Body B',focus:'Single-leg + shoulders/back',exercises:[
+  ['Dumbbell reverse lunge','3','8–10/leg'],['Kettlebell sumo deadlift','3','10–12'],
+  ['Dumbbell overhead press','3','8–12'],['Lat pulldown at HOA gym','3','8–12'],
+  ['Incline dumbbell press','2','10–12'],['Dumbbell curls','2','10–15'],['Dead bug','2','8–12/side']
+ ]},
+ 5:{name:'Full Body C',focus:'Athletic/metabolic full body',exercises:[
+  ['Dumbbell split squat','3','8–10/leg'],['Dumbbell hip thrust/glute bridge','3','10–15'],
+  ['Push-ups','3','8–15'],['Seated cable row or dumbbell row','3','10–12'],
+  ['Dumbbell shoulder press','2','8–12'],['Kettlebell swings','3','15–20'],['Farmer carry','3','30–45 sec']
+ ]}
+} as const
+
+function getTraining(){
+ const day=new Date().getDay()
+ const dayLabel=['SUN','MON','TUE','WED','THU','FRI','SAT'][day]
+ if(day===1||day===3||day===5)return {...workouts[day],dayLabel,duration:'25–35 min',kind:'strength' as const}
+ if(day===2||day===4)return {name:'Recovery + movement',dayLabel,duration:'5,000+ steps',kind:'movement' as const}
+ if(day===6)return {name:'Optional cardio, swim, or gym',dayLabel,duration:'Your pace',kind:'optional' as const}
+ return {name:'Recovery',dayLabel,duration:'5,000+ steps',kind:'recovery' as const}
+}
+
 export default function Page(){
  const [session,setSession]=useState<any>(null)
  const [email,setEmail]=useState('')
@@ -29,6 +56,7 @@ export default function Page(){
  const [msg,setMsg]=useState('')
  const [log,setLog]=useState<Log>(blank())
  const [history,setHistory]=useState<Log[]>([])
+ const training=getTraining()
 
  useEffect(()=>{
   supabase.auth.getSession().then(({data})=>setSession(data.session))
@@ -105,10 +133,34 @@ export default function Page(){
    </div>
   </nav>
 
-  <section className="welcome">
-   <p className="eyebrow">TODAY'S CHECK-IN</p>
-   <h1>Keep it simple.</h1>
-   <p>Hit the important numbers, make room for real life, and keep the trend moving.</p>
+  <section className="trainingWrap">
+   <p className="eyebrow">TODAY'S TRAINING</p>
+   <details className="trainingCard">
+    <summary>
+     <span className="trainingTitle"><strong><i>{training.dayLabel}</i> · {training.name}</strong><small>{training.duration}</small></span>
+     <span className="trainingToggle" aria-hidden="true">+</span>
+    </summary>
+    <div className="trainingBody">
+     {training.kind==='strength'&&<div className="exerciseList">
+      <p className="trainingFocus">{training.focus}</p>
+      <div className="exerciseHead"><span>Exercise</span><span>Sets</span><span>Reps</span></div>
+      {training.exercises.map(([exercise,sets,reps])=><div className="exerciseRow" key={exercise}>
+       <strong>{exercise}</strong><span>{sets}</span><span>{reps}</span>
+      </div>)}
+     </div>}
+     {(training.kind==='movement'||training.kind==='recovery')&&<div className="trainingNote">
+      <strong>Keep the body moving.</strong>
+      <p>Reach 5,000+ steps and add optional easy cardio if it feels good.</p>
+     </div>}
+     {training.kind==='optional'&&<div className="trainingNote">
+      <strong>Choose what supports the week.</strong>
+      <p>Take an easy cardio or swimming session, or head to the gym—everything is optional today.</p>
+     </div>}
+     <button className={`completeWorkout ${log.strength?'done':''}`} onClick={()=>setLog({...log,strength:!log.strength})}>
+      <span>{log.strength?'Workout complete':'Mark workout complete'}</span><b>{log.strength?'✓':'○'}</b>
+     </button>
+    </div>
+   </details>
   </section>
 
   <section className={`goalCard p${Math.min(4,Math.floor(progress/25)+1)}`}>
@@ -159,8 +211,7 @@ export default function Page(){
   </section>
 
   <section className="movement">
-   <button className={log.strength?'done':''} onClick={()=>setLog({...log,strength:!log.strength})}><span>Strength</span><b>{log.strength?'Done ✓':'Mark done'}</b></button>
-   <button className={log.cardio_minutes?'done':''} onClick={()=>setLog({...log,cardio_minutes:log.cardio_minutes?0:30})}><span>Cardio</span><b>{log.cardio_minutes?'30 min ✓':'Add 30 min'}</b></button>
+   <button className={log.cardio_minutes?'done':''} onClick={()=>setLog({...log,cardio_minutes:log.cardio_minutes?0:30})}><span>Optional Cardio</span><b>{log.cardio_minutes?'30 min ✓':'Add 30 min'}</b></button>
   </section>
 
   <label className="notes">
