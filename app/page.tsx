@@ -63,7 +63,7 @@ function getTraining(iso:string){
  const offset=Math.round((selected-anchor)/86400000)
  const dayLabel=date.toLocaleDateString(undefined,{weekday:'short'}).toUpperCase()
  if(Math.abs(offset)%2===1)return {name:'Recovery + Movement',type:'Recovery',dayLabel,duration:'At your pace',kind:'recovery' as const}
- const workoutIndex=((Math.floor(offset/2)%3)+3)%3
+ const workoutIndex=((Math.floor(offset/2)+1)%3+3)%3
  return {...workouts[workoutIndex],type:'Strength',dayLabel,duration:'25–35 min',kind:'strength' as const}
 }
 
