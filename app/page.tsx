@@ -12,7 +12,6 @@ type Log={
  water_oz:number|null
  strength:boolean
  cardio_minutes:number
- alcohol_drinks:number
  notes:string|null
 }
 
@@ -35,7 +34,7 @@ const shiftDate=(iso:string,days:number)=>{
 }
 const blank=(logDate=localISO()):Log=>({
  log_date:logDate,weight_lbs:null,calories:null,protein_g:null,carbs_g:null,
- steps:null,water_oz:null,strength:false,cardio_minutes:0,alcohol_drinks:0,notes:''
+ steps:null,water_oz:null,strength:false,cardio_minutes:0,notes:''
 })
 
 const workouts=[
@@ -113,18 +112,24 @@ export default function Page(){
   setMsg(created.error?.message||'Account created. Check your inbox if confirmation is enabled.')
  }
 
- async function save(){
+ async function persist(nextLog:Log,successMessage='Saved'){
   setMsg('Saving')
   const {error}=await supabase.from('daily_logs').upsert(
-   {...log,user_id:session.user.id,updated_at:new Date().toISOString()},
+   {...nextLog,user_id:session.user.id,updated_at:new Date().toISOString()},
    {onConflict:'user_id,log_date'}
   )
-  if(error)setMsg(error.message)
+  if(error){
+   setMsg(error.message)
+   return false
+  }
   else{
    await Promise.all([loadHistory(),loadSelected(false)])
-   setMsg('Saved')
+   setMsg(successMessage)
+   return true
   }
  }
+
+ async function save(){await persist(log)}
 
  const latest=history.find(x=>x.weight_lbs!=null)?.weight_lbs??180
  const lost=Math.max(0,180-latest)
@@ -137,26 +142,23 @@ export default function Page(){
  },[log.calories,log.protein_g])
 
  const number=(key:keyof Log,value:string)=>setLog({...log,[key]:value===''?null:Number(value)})
- const addDrink=(calories:number)=>setLog({
-  ...log,
-  alcohol_drinks:Number(log.alcohol_drinks||0)+1,
-  calories:Number(log.calories||0)+calories
- })
  const changeDate=(days:number)=>{
   const next=shiftDate(selectedDate,days)
   if(next<=today)setSelectedDate(next)
  }
- const addDelta=()=>{
+ const addDelta=async()=>{
   const amount=Number(quickValue)
   if(!Number.isFinite(amount)||amount<=0)return
-  setLog(current=>({...current,[quickMetric]:Number(current[quickMetric]||0)+amount}))
-  setQuickValue('')
+  const next={...log,[quickMetric]:Number(log[quickMetric]||0)+amount}
+  setLog(next)
+  if(await persist(next,'Added ✓'))setQuickValue('')
  }
- const addMeal=()=>{
+ const addMeal=async()=>{
   const entries=(Object.entries(meal) as [keyof typeof meal,string][]).filter(([,value])=>Number(value)>0)
   if(!entries.length)return
-  setLog(current=>entries.reduce((next,[key,value])=>({...next,[key]:Number(next[key]||0)+Number(value)}),current))
-  setMeal({calories:'',protein_g:'',carbs_g:''})
+  const next=entries.reduce((current,[key,value])=>({...current,[key]:Number(current[key]||0)+Number(value)}),log)
+  setLog(next)
+  if(await persist(next,'Meal added ✓'))setMeal({calories:'',protein_g:'',carbs_g:''})
  }
 
  if(!session)return <main className="loginPage">
@@ -232,6 +234,27 @@ export default function Page(){
    <span className={`signal ${status[1]}`}>● {status[0]}</span>
   </div>
 
+  <section className="quickAdd">
+   <div className="quickAddBar">
+    <span className="eyebrow">QUICK ADD</span>
+    <select value={quickMetric} onChange={e=>setQuickMetric(e.target.value as DeltaKey)} aria-label="Metric to add">
+     <option value="calories">Calories</option><option value="protein_g">Protein</option>
+     <option value="carbs_g">Carbs</option><option value="water_oz">Water</option><option value="steps">Steps</option>
+    </select>
+    <input type="number" min="0" step="any" inputMode="decimal" placeholder="0" value={quickValue} onChange={e=>setQuickValue(e.target.value)} aria-label="Amount to add"/>
+    <button onClick={addDelta} disabled={Number(quickValue)<=0||msg==='Saving'}>{msg==='Saving'?'Saving…':'+ Add & save'}</button>
+   </div>
+   <details className="addMeal">
+    <summary>Add meal</summary>
+    <div className="mealFields">
+     <label><span>Calories</span><input type="number" min="0" inputMode="decimal" placeholder="0" value={meal.calories} onChange={e=>setMeal({...meal,calories:e.target.value})}/></label>
+     <label><span>Protein</span><input type="number" min="0" inputMode="decimal" placeholder="0 g" value={meal.protein_g} onChange={e=>setMeal({...meal,protein_g:e.target.value})}/></label>
+     <label><span>Carbs</span><input type="number" min="0" inputMode="decimal" placeholder="0 g" value={meal.carbs_g} onChange={e=>setMeal({...meal,carbs_g:e.target.value})}/></label>
+     <button onClick={addMeal} disabled={msg==='Saving'}>{msg==='Saving'?'Saving…':`Add & save to ${isToday?'today':selectedLabel}`}</button>
+    </div>
+   </details>
+  </section>
+
   <section className="metrics">
    <Metric kind="calories" icon="◒" label="Calories" value={log.calories} unit="kcal" target="Goal · 1,650–1,800" onChange={v=>number('calories',v)}/>
    <Metric kind="protein" icon="◆" label="Protein" value={log.protein_g} unit="g" target="Goal · 140–150+" onChange={v=>number('protein_g',v)}/>
@@ -248,39 +271,6 @@ export default function Page(){
     <span>Carbs <small>Flexible · 100–150g</small></span>
     <div><input type="number" value={log.carbs_g??''} placeholder="0" onChange={e=>number('carbs_g',e.target.value)}/><b>g</b></div>
    </label>
-  </section>
-
-  <section className="quickAdd">
-   <div className="quickAddBar">
-    <span className="eyebrow">QUICK ADD</span>
-    <select value={quickMetric} onChange={e=>setQuickMetric(e.target.value as DeltaKey)} aria-label="Metric to add">
-     <option value="calories">Calories</option><option value="protein_g">Protein</option>
-     <option value="carbs_g">Carbs</option><option value="water_oz">Water</option><option value="steps">Steps</option>
-    </select>
-    <input type="number" min="0" step="any" inputMode="decimal" placeholder="0" value={quickValue} onChange={e=>setQuickValue(e.target.value)} aria-label="Amount to add"/>
-    <button onClick={addDelta} disabled={Number(quickValue)<=0}>+ Add</button>
-   </div>
-   <details className="addMeal">
-    <summary>Add meal</summary>
-    <div className="mealFields">
-     <label><span>Calories</span><input type="number" min="0" inputMode="decimal" placeholder="0" value={meal.calories} onChange={e=>setMeal({...meal,calories:e.target.value})}/></label>
-     <label><span>Protein</span><input type="number" min="0" inputMode="decimal" placeholder="0 g" value={meal.protein_g} onChange={e=>setMeal({...meal,protein_g:e.target.value})}/></label>
-     <label><span>Carbs</span><input type="number" min="0" inputMode="decimal" placeholder="0 g" value={meal.carbs_g} onChange={e=>setMeal({...meal,carbs_g:e.target.value})}/></label>
-     <button onClick={addMeal}>Add to {isToday?'today':selectedLabel}</button>
-    </div>
-   </details>
-  </section>
-
-  <section className="drinkCard">
-   <div>
-    <p className="eyebrow">KEEP THE DRINKS VISIBLE</p>
-    <h2>{log.alcohol_drinks||0} <span>drinks {isToday?'today':`on ${selectedLabel}`}</span></h2>
-    <p>Quick adds include estimated alcohol calories in your daily calorie total.</p>
-   </div>
-   <div className="drinkBtns">
-    <button onClick={()=>addDrink(100)}>+ Highball <small>100 kcal</small></button>
-    <button onClick={()=>addDrink(100)}>+ Tequila soda <small>100 kcal</small></button>
-   </div>
   </section>
 
   <section className="movement">
