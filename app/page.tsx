@@ -2,17 +2,25 @@
 import {FormEvent,useEffect,useMemo,useRef,useState} from 'react'
 import type {Session} from '@supabase/supabase-js'
 import {supabase} from '../lib/supabase'
-import type {Tables} from '../lib/database.types'
+import {
+ emptyDailyMetrics,getDailyMetrics,incrementDailyMetric,saveDailyMetrics,
+ type DailyMetricDeltaKey,type DailyMetrics
+} from '../lib/daily-metrics'
+import {
+ getBodyMeasurement,getRecentWeights,saveBodyWeight,
+ type BodyMeasurement,type WeightHistory
+} from '../lib/body-measurements'
+import {
+ getWorkoutPlan,isStrengthOpportunity,setWorkoutCompletion,
+ type StructuredWorkoutCode,type WorkoutPlan
+} from '../lib/workouts'
 import {
  createNutritionEntry,deleteNutritionEntry,emptyDailyNutritionTotals,
  getDailyNutritionTotals,getNutritionEntries,updateNutritionEntry,
  type DailyNutritionTotals,type MealSlot,type NutritionEntry
 } from '../lib/nutrition'
 
-type DailyLogRow=Tables<'daily_logs'>
-type Log=Pick<DailyLogRow,'log_date'|'weight_lbs'|'steps'|'water_oz'|'strength'|'cardio_minutes'|'notes'>
-type HistoryLog=Pick<DailyLogRow,'log_date'|'weight_lbs'>
-type MetricKey='calories'|'protein_g'|'carbs_g'
+type MetricKey='calories'|'protein_g'|'carbs_g'|DailyMetricDeltaKey
 type MealDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string}
 type EditDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string}
 
@@ -31,41 +39,41 @@ const shiftDate=(iso:string,days:number)=>{
  date.setDate(date.getDate()+days)
  return localISO(date)
 }
-const blank=(logDate=localISO()):Log=>({
- log_date:logDate,weight_lbs:null,steps:null,water_oz:null,strength:false,cardio_minutes:0,notes:''
-})
 const blankMeal=():MealDraft=>({description:'',mealSlot:'',calories:'',protein_g:'',carbs_g:''})
 
-const workouts=[
- {name:'Full Body A',focus:'Squat + horizontal push/pull',exercises:[
+const workouts:Record<StructuredWorkoutCode,{name:string;focus:string;exercises:readonly (readonly [string,string,string])[]}>= {
+ full_body_a:{name:'Full Body A',focus:'Squat + horizontal push/pull',exercises:[
   ['Goblet squat','3','8–12'],['Dumbbell Romanian deadlift','3','8–12'],
   ['Dumbbell bench/floor press','3','8–12'],['One-arm dumbbell row','3','10–12/side'],
   ['Dumbbell lateral raise','2','12–15'],['Kettlebell swings','3','15'],['Plank','2','30–60 sec']
  ]},
- {name:'Full Body B',focus:'Single-leg + shoulders/back',exercises:[
+ full_body_b:{name:'Full Body B',focus:'Single-leg + shoulders/back',exercises:[
   ['Dumbbell reverse lunge','3','8–10/leg'],['Kettlebell sumo deadlift','3','10–12'],
   ['Dumbbell overhead press','3','8–12'],['Lat pulldown','3','8–12'],
   ['Incline dumbbell press','2','10–12'],['Dumbbell curls','2','10–15'],['Dead bug','2','8–12/side']
  ]},
- {name:'Full Body C',focus:'Athletic/metabolic full body',exercises:[
+ full_body_c:{name:'Full Body C',focus:'Athletic/metabolic full body',exercises:[
   ['Dumbbell split squat','3','8–10/leg'],['Dumbbell hip thrust/glute bridge','3','10–15'],
   ['Push-ups','3','8–15'],['Seated cable row or dumbbell row','3','10–12'],
   ['Dumbbell shoulder press','2','8–12'],['Kettlebell swings','3','15–20'],['Farmer carry','3','30–45 sec']
  ]}
-] as const
-
-function getTraining(iso:string){
- const anchor=Date.UTC(2026,7,27)
- const date=localDate(iso)
- const selected=Date.UTC(date.getFullYear(),date.getMonth(),date.getDate())
- const offset=Math.round((selected-anchor)/86400000)
- const dayLabel=date.toLocaleDateString(undefined,{weekday:'short'}).toUpperCase()
- if(Math.abs(offset)%2===1)return {name:'Recovery + Movement',type:'Recovery',dayLabel,duration:'At your pace',kind:'recovery' as const}
- const workoutIndex=((Math.floor(offset/2)+1)%3+3)%3
- return {...workouts[workoutIndex],type:'Strength',dayLabel,duration:'25–35 min',kind:'strength' as const}
 }
 
-const metricLabels:Record<MetricKey,string>={calories:'Calories',protein_g:'Protein',carbs_g:'Carbs'}
+function emptyWorkoutPlan(logDate:string):WorkoutPlan{
+ const strengthOpportunity=isStrengthOpportunity(logDate)
+ return {code:strengthOpportunity?'full_body_a':'recovery',completed:false,session:null,strengthOpportunity}
+}
+
+function getTraining(iso:string,plan:WorkoutPlan){
+ const date=localDate(iso)
+ const dayLabel=date.toLocaleDateString(undefined,{weekday:'short'}).toUpperCase()
+ if(plan.code==='recovery')return {name:'Recovery + Movement',type:'Recovery',dayLabel,duration:'At your pace',kind:'recovery' as const}
+ return {...workouts[plan.code],type:'Strength',dayLabel,duration:'25–35 min',kind:'strength' as const}
+}
+
+const metricLabels:Record<MetricKey,string>={
+ calories:'Calories',protein_g:'Protein',carbs_g:'Carbs',steps:'Steps',water_oz:'Water'
+}
 const errorText=(error:unknown)=>error instanceof Error?error.message:'Something went wrong. Please try again.'
 const parseMetric=(value:string,label:string)=>{
  if(value.trim()==='')return null
@@ -93,21 +101,25 @@ export default function Page(){
  const [selectedDate,setSelectedDate]=useState(localISO())
  const selectedDateRef=useRef(selectedDate)
  const loadSequence=useRef(0)
- const [log,setLog]=useState<Log>(()=>blank(localISO()))
- const [history,setHistory]=useState<HistoryLog[]>([])
+ const [metrics,setMetrics]=useState<DailyMetrics>(()=>emptyDailyMetrics(localISO()))
+ const [measurement,setMeasurement]=useState<BodyMeasurement|null>(null)
+ const [weightLbs,setWeightLbs]=useState<number|null>(null)
+ const [weightHistory,setWeightHistory]=useState<WeightHistory[]>([])
+ const [workoutPlan,setWorkoutPlan]=useState<WorkoutPlan>(()=>emptyWorkoutPlan(localISO()))
+ const [workoutBusy,setWorkoutBusy]=useState(false)
  const [entries,setEntries]=useState<NutritionEntry[]>([])
  const [totals,setTotals]=useState<DailyNutritionTotals>(()=>emptyDailyNutritionTotals(localISO()))
  const [nutritionLoading,setNutritionLoading]=useState(false)
  const [nutritionBusy,setNutritionBusy]=useState<string|null>(null)
  const [nutritionError,setNutritionError]=useState('')
- const [nutritionNotice,setNutritionNotice]=useState<{text:string;entryId:string;logDate:string}|null>(null)
+ const [nutritionNotice,setNutritionNotice]=useState<{text:string;entryId:string|null;logDate:string}|null>(null)
  const [quickMetric,setQuickMetric]=useState<MetricKey>('calories')
  const [quickValue,setQuickValue]=useState('')
  const [meal,setMeal]=useState<MealDraft>(blankMeal)
  const [mealOpen,setMealOpen]=useState(false)
  const [editingId,setEditingId]=useState<string|null>(null)
  const [editDraft,setEditDraft]=useState<EditDraft|null>(null)
- const training=getTraining(selectedDate)
+ const training=getTraining(selectedDate,workoutPlan)
  const today=localISO()
  const isToday=selectedDate===today
  const selectedLabel=localDate(selectedDate).toLocaleDateString(undefined,{month:'short',day:'numeric'})
@@ -126,13 +138,13 @@ export default function Page(){
   setEditDraft(null)
   if(session)void loadSelected(selectedDate)
  },[session,selectedDate])
- useEffect(()=>{if(session)void loadHistory()},[session])
+ useEffect(()=>{
+  if(session)void loadWeightHistory().catch(error=>setMsg(errorText(error)))
+ },[session])
 
- async function loadHistory(){
+ async function loadWeightHistory(){
   if(!session)return
-  const {data,error}=await supabase.from('daily_logs').select('log_date,weight_lbs').eq('user_id',session.user.id).order('log_date',{ascending:false}).limit(45)
-  if(error){setMsg(error.message);return}
-  setHistory(data||[])
+  setWeightHistory(await getRecentWeights(supabase,session.user.id))
  }
 
  async function loadSelected(logDate:string,clearMessage=true){
@@ -140,25 +152,34 @@ export default function Page(){
   if(selectedDateRef.current!==logDate)return
   const sequence=++loadSequence.current
   if(clearMessage)setMsg('')
-  setLog(blank(logDate))
+  setMetrics(emptyDailyMetrics(logDate))
+  setMeasurement(null)
+  setWeightLbs(null)
+  setWorkoutPlan(emptyWorkoutPlan(logDate))
   setEntries([])
   setTotals(emptyDailyNutritionTotals(logDate))
   setNutritionLoading(true)
   const results=await Promise.allSettled([
-   supabase.from('daily_logs').select('log_date,weight_lbs,steps,water_oz,strength,cardio_minutes,notes').eq('user_id',session.user.id).eq('log_date',logDate).maybeSingle(),
+   getDailyMetrics(supabase,session.user.id,logDate),
+   getBodyMeasurement(supabase,session.user.id,logDate),
    getNutritionEntries(supabase,session.user.id,logDate),
-   getDailyNutritionTotals(supabase,session.user.id,logDate)
+   getDailyNutritionTotals(supabase,session.user.id,logDate),
+   getWorkoutPlan(supabase,session.user.id,logDate)
   ])
   if(sequence!==loadSequence.current||selectedDateRef.current!==logDate)return
-  const [dailyResult,entriesResult,totalsResult]=results
-  if(dailyResult.status==='fulfilled'){
-   if(dailyResult.value.error)setMsg(dailyResult.value.error.message)
-   setLog(dailyResult.value.data||blank(logDate))
-  }else setMsg(errorText(dailyResult.reason))
+  const [metricsResult,measurementResult,entriesResult,totalsResult,workoutResult]=results
+  if(metricsResult.status==='fulfilled')setMetrics(metricsResult.value)
+  else setMsg(errorText(metricsResult.reason))
+  if(measurementResult.status==='fulfilled'){
+   setMeasurement(measurementResult.value)
+   setWeightLbs(measurementResult.value?.weight_lbs??null)
+  }else setMsg(errorText(measurementResult.reason))
   if(entriesResult.status==='fulfilled')setEntries(entriesResult.value)
   else setNutritionError(errorText(entriesResult.reason))
   if(totalsResult.status==='fulfilled')setTotals(totalsResult.value)
   else setNutritionError(errorText(totalsResult.reason))
+  if(workoutResult.status==='fulfilled')setWorkoutPlan(workoutResult.value)
+  else setMsg(errorText(workoutResult.reason))
   setNutritionLoading(false)
  }
 
@@ -183,29 +204,41 @@ export default function Page(){
   setMsg(created.error?.message||'Account created. Check your inbox if confirmation is enabled.')
  }
 
- async function persist(nextLog:Log,successMessage='Saved'){
+ async function persist(
+  nextMetrics:DailyMetrics,nextWeight:number|null,nextMeasurement:BodyMeasurement|null,successMessage='Saved'
+ ){
   if(!session)return false
+  const logDate=nextMetrics.log_date
   setMsg('Saving')
-  const payload={
-   user_id:session.user.id,log_date:nextLog.log_date,weight_lbs:nextLog.weight_lbs,
-   steps:nextLog.steps,water_oz:nextLog.water_oz,strength:nextLog.strength,
-   cardio_minutes:nextLog.cardio_minutes,notes:nextLog.notes,updated_at:new Date().toISOString()
+  const [metricsResult,weightResult]=await Promise.allSettled([
+   saveDailyMetrics(supabase,session.user.id,nextMetrics),
+   saveBodyWeight(supabase,{
+    userId:session.user.id,logDate,weightLbs:nextWeight,
+    existing:nextMeasurement,isToday:logDate===localISO()
+   })
+  ])
+  if(weightResult.status==='fulfilled'){
+   try{await loadWeightHistory()}catch(error){
+    if(selectedDateRef.current===logDate)setMsg(errorText(error))
+   }
   }
-  const {error}=await supabase.from('daily_logs').upsert(payload,{onConflict:'user_id,log_date'})
-  if(error){
-   if(selectedDateRef.current===nextLog.log_date)setMsg(error.message)
-   return false
+  if(selectedDateRef.current!==logDate)return metricsResult.status==='fulfilled'&&weightResult.status==='fulfilled'
+  if(metricsResult.status==='fulfilled')setMetrics(metricsResult.value)
+  if(weightResult.status==='fulfilled'){
+   setMeasurement(weightResult.value)
+   setWeightLbs(weightResult.value?.weight_lbs??null)
   }
-  const refreshes=[loadHistory()]
-  if(selectedDateRef.current===nextLog.log_date)refreshes.push(loadSelected(nextLog.log_date,false))
-  await Promise.all(refreshes)
-  if(selectedDateRef.current===nextLog.log_date)setMsg(successMessage)
+  const errors=[]
+  if(metricsResult.status==='rejected')errors.push(errorText(metricsResult.reason))
+  if(weightResult.status==='rejected')errors.push(errorText(weightResult.reason))
+  if(errors.length){setMsg(errors.join(' '));return false}
+  setMsg(successMessage)
   return true
  }
 
- async function save(){await persist(log)}
+ async function save(){await persist(metrics,weightLbs,measurement)}
 
- const latest=history.find(item=>item.weight_lbs!=null)?.weight_lbs??180
+ const latest=weightHistory[0]?.weight_lbs??180
  const lost=Math.max(0,180-latest)
  const progress=Math.max(0,Math.min(100,lost/15*100))
  const status=useMemo(()=>{
@@ -217,12 +250,17 @@ export default function Page(){
   return ['Over target','bad']
  },[totals])
 
- const number=(key:keyof Log,value:string)=>setLog(current=>({...current,[key]:value===''?null:Number(value)}))
+ const metricNumber=(key:'steps'|'water_oz',value:string)=>{
+  setMetrics(current=>({...current,[key]:value===''?null:Number(value)}))
+ }
  const changeDate=(days:number)=>{
   const next=shiftDate(selectedDate,days)
   if(next<=today){
    selectedDateRef.current=next
-   setLog(blank(next))
+   setMetrics(emptyDailyMetrics(next))
+   setMeasurement(null)
+   setWeightLbs(null)
+   setWorkoutPlan(emptyWorkoutPlan(next))
    setEntries([])
    setTotals(emptyDailyNutritionTotals(next))
    setNutritionLoading(true)
@@ -239,14 +277,31 @@ export default function Page(){
   setNutritionBusy('quick')
   setNutritionError('')
   try{
+   if(quickMetric==='steps'||quickMetric==='water_oz'){
+    const nextMetrics=await incrementDailyMetric(
+     supabase,session.user.id,logDate,quickMetric,amount
+    )
+    if(selectedDateRef.current===logDate){
+     setQuickValue('')
+     setMetrics(current=>({
+      ...current,
+      id:nextMetrics.id,
+      [quickMetric]:nextMetrics[quickMetric]
+     }))
+     setNutritionNotice({text:`Added ${metricLabels[quickMetric].toLowerCase()} ✓`,entryId:null,logDate})
+    }
+    return
+   }
    const values:{calories:number|null;protein_g:number|null;carbs_g:number|null}={calories:null,protein_g:null,carbs_g:null}
    values[quickMetric]=amount
    const entry=await createNutritionEntry(supabase,{
     userId:session.user.id,logDate,entryType:'quick_add',description:`Quick add: ${metricLabels[quickMetric]}`,
     source:'quick_add',...values
    })
-   setQuickValue('')
-   if(selectedDateRef.current===logDate)setNutritionNotice({text:`Added ${metricLabels[quickMetric].toLowerCase()} ✓`,entryId:entry.id,logDate})
+   if(selectedDateRef.current===logDate){
+    setQuickValue('')
+    setNutritionNotice({text:`Added ${metricLabels[quickMetric].toLowerCase()} ✓`,entryId:entry.id,logDate})
+   }
    try{await refreshNutrition(logDate)}catch{
     if(selectedDateRef.current===logDate)setNutritionError('Added successfully, but totals could not refresh. Reload to see the latest values.')
    }
@@ -296,7 +351,7 @@ export default function Page(){
  }
 
  async function undoLastAdd(){
-  if(!session||!nutritionNotice||nutritionBusy)return
+  if(!session||!nutritionNotice?.entryId||nutritionBusy)return
   const notice=nutritionNotice
   setNutritionBusy('undo')
   setNutritionError('')
@@ -306,6 +361,30 @@ export default function Page(){
    if(selectedDateRef.current===notice.logDate)setNutritionNotice(null)
   }catch(error){if(selectedDateRef.current===notice.logDate)setNutritionError(errorText(error))}
   finally{setNutritionBusy(null)}
+ }
+
+ async function toggleWorkout(){
+  if(!session||workoutBusy)return
+  const logDate=selectedDate
+  const plan=workoutPlan
+  setWorkoutBusy(true)
+  setMsg('')
+  try{
+   await setWorkoutCompletion(supabase,{
+    userId:session.user.id,
+    logDate,
+    code:plan.code,
+    completed:!plan.completed,
+    session:plan.session,
+    isToday:logDate===localISO()
+   })
+   const refreshed=await getWorkoutPlan(supabase,session.user.id,logDate)
+   if(selectedDateRef.current===logDate)setWorkoutPlan(refreshed)
+  }catch(error){
+   if(selectedDateRef.current===logDate)setMsg(errorText(error))
+  }finally{
+   setWorkoutBusy(false)
+  }
  }
 
  function beginEdit(entry:NutritionEntry){
@@ -403,8 +482,8 @@ export default function Page(){
       </div>)}
      </div>}
      {training.kind==='recovery'&&<div className="trainingNote"><strong>Goal: 5,000+ steps</strong><p>Optional easy cardio / mobility</p></div>}
-     <button className={`completeWorkout ${log.strength?'done':''}`} onClick={()=>setLog(current=>({...current,strength:!current.strength}))}>
-      <span>{log.strength?'Workout complete':'Mark workout complete'}</span><b>{log.strength?'✓':'○'}</b>
+     <button className={`completeWorkout ${workoutPlan.completed?'done':''}`} onClick={toggleWorkout} disabled={workoutBusy}>
+      <span>{workoutBusy?'Updating…':workoutPlan.completed?'Workout complete':'Mark workout complete'}</span><b>{workoutPlan.completed?'✓':'○'}</b>
      </button>
     </div>
    </details>
@@ -424,10 +503,10 @@ export default function Page(){
   <section className="quickAdd">
    <form className="quickAddBar" onSubmit={addQuick}>
     <span className="eyebrow">QUICK ADD</span>
-    <select value={quickMetric} onChange={event=>setQuickMetric(event.target.value as MetricKey)} aria-label="Nutrition metric to add">
-     <option value="calories">Calories</option><option value="protein_g">Protein</option><option value="carbs_g">Carbs</option>
+    <select value={quickMetric} onChange={event=>setQuickMetric(event.target.value as MetricKey)} aria-label="Metric to add">
+     <option value="calories">Calories</option><option value="protein_g">Protein</option><option value="carbs_g">Carbs</option><option value="water_oz">Water</option><option value="steps">Steps</option>
     </select>
-    <input type="number" min="0" step="any" inputMode="decimal" placeholder="0" value={quickValue} onChange={event=>setQuickValue(event.target.value)} aria-label="Amount to add"/>
+    <input type="number" min="0" step={quickMetric==='steps'?'1':'any'} inputMode="decimal" placeholder="0" value={quickValue} onChange={event=>setQuickValue(event.target.value)} aria-label="Amount to add"/>
     <button disabled={Number(quickValue)<=0||nutritionBusy!==null}>{nutritionBusy==='quick'?'Adding…':'+ Add'}</button>
    </form>
    <details className="addMeal" open={mealOpen} onToggle={event=>setMealOpen(event.currentTarget.open)}>
@@ -443,19 +522,19 @@ export default function Page(){
    </details>
    {(nutritionError||nutritionNotice)&&<div className={`nutritionFeedback ${nutritionError?'error':''}`} role="status">
     <span>{nutritionError||nutritionNotice?.text}</span>
-    {!nutritionError&&nutritionNotice&&<button type="button" onClick={undoLastAdd} disabled={nutritionBusy!==null}>Undo</button>}
+    {!nutritionError&&nutritionNotice?.entryId&&<button type="button" onClick={undoLastAdd} disabled={nutritionBusy!==null}>Undo</button>}
    </div>}
   </section>
 
   <section className="metrics">
    <NutritionMetric kind="calories" icon="◒" label="Calories" value={totals.calories} unit="kcal" target="Goal · 1,650–1,800" partial={totals.calories_unknown_count>0} loading={nutritionLoading}/>
    <NutritionMetric kind="protein" icon="◆" label="Protein" value={totals.protein_g} unit="g" target="Goal · 140–150+" partial={totals.protein_unknown_count>0} loading={nutritionLoading}/>
-   <Metric kind="steps" icon="↗" label="Steps" value={log.steps} unit="" target="Goal · 5,000+" onChange={value=>number('steps',value)}/>
-   <Metric kind="weight" icon="●" label="Weight" value={log.weight_lbs} unit="lb" target="Destination · 165 lb" step=".1" onChange={value=>number('weight_lbs',value)}/>
+   <Metric kind="steps" icon="↗" label="Steps" value={metrics.steps} unit="" target="Goal · 5,000+" onChange={value=>metricNumber('steps',value)}/>
+   <Metric kind="weight" icon="●" label="Weight" value={weightLbs} unit="lb" target="Destination · 165 lb" step=".1" onChange={value=>setWeightLbs(value===''?null:Number(value))}/>
   </section>
 
   <section className="softGrid">
-   <label className="softCard"><span>Water <small>Goal · 80 oz/day</small></span><div><input type="number" value={log.water_oz??''} placeholder="0" onChange={event=>number('water_oz',event.target.value)}/><b>/ 80 oz</b></div></label>
+   <label className="softCard"><span>Water <small>Goal · 80 oz/day</small></span><div><input type="number" value={metrics.water_oz??''} placeholder="0" onChange={event=>metricNumber('water_oz',event.target.value)}/><b>/ 80 oz</b></div></label>
    <article className="softCard nutritionSoft"><span>Carbs <small>Flexible · 100–150g</small></span><div><strong>{nutritionLoading?'—':formatNumber(totals.carbs_g)}</strong><b>g</b>{totals.carbs_unknown_count>0&&<em>partial</em>}</div></article>
   </section>
 
@@ -484,9 +563,9 @@ export default function Page(){
     </article>)}
   </section>
 
-  <section className="movement"><button className={log.cardio_minutes?'done':''} onClick={()=>setLog(current=>({...current,cardio_minutes:current.cardio_minutes?0:30}))}><span>Optional Cardio</span><b>{log.cardio_minutes?'30 min ✓':'Add 30 min'}</b></button></section>
+  <section className="movement"><button className={metrics.cardio_minutes?'done':''} onClick={()=>setMetrics(current=>({...current,cardio_minutes:current.cardio_minutes?null:30}))}><span>Optional Cardio</span><b>{metrics.cardio_minutes?`${metrics.cardio_minutes} min ✓`:'Add 30 min'}</b></button></section>
 
-  <label className="notes"><span>Notes</span><textarea placeholder="Dinner out, wine tasting, hunger, workout, anything useful..." value={log.notes||''} onChange={event=>setLog({...log,notes:event.target.value})}/></label>
+  <label className="notes"><span>Notes</span><textarea placeholder="Dinner out, wine tasting, hunger, workout, anything useful..." value={metrics.notes||''} onChange={event=>setMetrics(current=>({...current,notes:event.target.value}))}/></label>
 
   <button className="save" onClick={save}><span>{msg==='Saved'?'Saved ✓':msg==='Saving'?'Saving...':`Save ${isToday?'today':selectedLabel}`}</span><b>↗</b></button>
  </main>
