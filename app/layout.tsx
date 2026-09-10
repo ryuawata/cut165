@@ -1,4 +1,5 @@
 import './globals.css'
+import './nutrition.css'
 
 export const metadata={
  title:'CUT 165',

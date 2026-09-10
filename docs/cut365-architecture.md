@@ -12,6 +12,8 @@ The user-selected `log_date` is the authoritative calendar date for daily loggin
 
 Daily nutrition totals are derived from `nutrition_entries` through `daily_nutrition_totals`. They are not copied into a stored or cached summary table. This prevents separately stored totals and entries from drifting apart.
 
+The Phase 2 nutrition UI reads those derived totals and persists Quick Add, meal, drink, edit, and delete actions as individual `nutrition_entries` through the shared nutrition service. It does not write nutrition totals back to legacy `daily_logs`.
+
 ## Application and AI boundaries
 
 The user interface and any future AI capabilities must use shared domain services for authorization, validation, date handling, goal-target lookup, and persistence. Business or safety policy thresholds belong in those application services, not in database constraints.

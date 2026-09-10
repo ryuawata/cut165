@@ -2,7 +2,7 @@
 
 ## Current phase
 
-Commercial-foundation migration approved and locally validated. Remote application and post-migration verification have been requested in the separate “Cut 165 App Development” task, but completion has not yet been verified. Nothing has been committed or pushed here.
+Phase 1 database foundation is complete in production. Phase 2 nutrition-entry cutover is complete and validated on the `cut365-phase-2` feature branch. Production was not modified during Phase 2.
 
 ## Decisions
 
@@ -10,8 +10,10 @@ Commercial-foundation migration approved and locally validated. Remote applicati
 - Preserve goal history; clients transition goal status instead of deleting goals.
 - Keep historical, non-overlapping `[)` goal targets read-only to authenticated clients; server/service-role writes only.
 - Use `workout_sessions`, `alcohol_servings`, nullable nutrition values with completeness counts, ownership RLS, and idempotent legacy imports.
+- Nutrition source of truth is `nutrition_entries`; displayed daily totals come from the derived `daily_nutrition_totals` view.
+- Remaining non-nutrition data continues to use legacy `daily_logs` during the incremental cutover.
 - Keep AI and photo logging out of this phase.
 
 ## Next task
 
-Review the other task's apply and post-migration verification results. If they pass, record Phase 1 as applied and begin Phase 2: migrate the CUT365 UI to the new nutrition-entry model.
+Review and merge the `cut365-phase-2` feature branch. Do not begin Phase 3 until Phase 2 is accepted; AI and photo logging remain deferred.

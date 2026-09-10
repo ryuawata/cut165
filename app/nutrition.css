@@ -1,0 +1,49 @@
+.nutritionMetric .metricValue strong{font-size:48px;line-height:1;letter-spacing:-3px}
+.metricTop em,.nutritionSoft em{margin-left:auto;border-radius:20px;background:rgba(255,255,255,.75);padding:4px 7px;font-size:9px;font-style:normal;font-weight:600;letter-spacing:.3px;color:#8b6a24}
+.nutritionSoft div strong{font-size:32px;letter-spacing:-1.5px}
+.nutritionSoft div b{margin-left:4px}
+.nutritionSoft div em{margin-left:9px}
+.quickAddBar{grid-template-columns:auto minmax(120px,1fr) 100px auto}
+.mealFields{grid-template-columns:minmax(150px,2fr) minmax(100px,1fr) repeat(3,minmax(72px,1fr));align-items:end}
+.mealFields button{grid-column:1/-1;justify-self:end}
+.nutritionFeedback{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:11px;border-radius:11px;background:#edf7ef;padding:9px 11px;font-size:11px;color:#326845}
+.nutritionFeedback.error{background:#fff0ed;color:#9b3f31}
+.nutritionFeedback button{border:0;background:none;color:inherit;padding:0;text-decoration:underline;text-underline-offset:3px}
+.drinkBtns button:disabled,.entryRowActions button:disabled,.entryActions button:disabled{opacity:.45;cursor:default}
+.nutritionEntries{margin-top:14px;border:1px solid var(--line);border-radius:24px;padding:22px}
+.nutritionEntriesHead{display:flex;align-items:end;justify-content:space-between;gap:20px;padding-bottom:14px}
+.nutritionEntriesHead .eyebrow{margin-bottom:4px}
+.nutritionEntriesHead h3{margin:0;font-size:22px;letter-spacing:-.7px}
+.nutritionEntriesHead>span{font-size:11px;color:#888}
+.entryEmpty{margin:0;border-top:1px solid var(--line);padding:20px 0 4px;font-size:12px;color:#888}
+.entryRow{display:flex;align-items:center;justify-content:space-between;gap:18px;border-top:1px solid var(--line);padding:14px 0}
+.entryRow>div:first-child{min-width:0;display:grid;gap:3px}
+.entryLabel{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#999}
+.entryRow strong{font-size:13px;font-weight:600}
+.entryRow small{font-size:11px;color:#777}
+.entryRowActions{display:flex;gap:5px}
+.entryRowActions button{border:1px solid var(--line);border-radius:9px;background:#fff;padding:7px 9px;font-size:10px;color:#666;cursor:pointer}
+.entryEdit{border-top:1px solid var(--line);padding:14px 0}
+.entryEditTop{display:grid;grid-template-columns:1fr 140px;gap:7px}
+.entryEdit input,.entryEdit select{width:100%;min-width:0;border:1px solid var(--line);border-radius:10px;background:#fff;padding:9px 10px;font:11px 'DM Sans';outline:0}
+.entryEditMetrics{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:8px}
+.entryEditMetrics label{font-size:9px;color:#777}
+.entryEditMetrics input{display:block;margin-top:4px}
+.entryEdit>small{display:block;margin-top:8px;color:#888}
+.entryActions{display:flex;gap:6px;margin-top:10px}
+.entryActions button{border:0;border-radius:9px;background:#171717;color:#fff;padding:8px 11px;font-size:10px;font-weight:600;cursor:pointer}
+.entryActions .quiet{background:#f1f1ee;color:#555}
+.entryActions .delete{margin-left:auto;background:#fff0ed;color:#9b3f31}
+
+@media(max-width:650px){
+ .nutritionMetric .metricValue strong{font-size:39px}
+ .mealFields{grid-template-columns:1fr 1fr}
+ .mealFields .mealDescription{grid-column:1/-1}
+ .mealFields button{grid-column:1/-1;width:100%;justify-self:stretch}
+ .drinkBtns{display:grid;grid-template-columns:1fr 1fr}
+ .entryRow{align-items:flex-start}
+ .entryRowActions{display:grid}
+ .entryEditTop{grid-template-columns:1fr}
+ .nutritionEntries{padding:18px}
+ .nutritionEntriesHead{align-items:center}
+}
