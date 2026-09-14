@@ -556,6 +556,10 @@ export default function Page(){
   setSettingsOpen(false)
  }
 
+ function finishProfileSettings(nextProfile:Profile){
+  setProfile(nextProfile)
+ }
+
  if(authLoading||bootstrapStatus==='auth-loading'||bootstrapStatus==='profile-loading')return <main className="bootstrapPage">
   <div className="masterBrand">CUT365</div><p>Loading your plan…</p>
  </main>
@@ -589,12 +593,12 @@ export default function Page(){
  return <main className="app">
   <nav>
    <div><div className="brand">{goalIdentity(activeGoal.target_weight_lbs)}</div><small className="productMark">CUT365</small></div>
-   <div className="navRight"><button onClick={()=>setSettingsOpen(true)}>Goal settings</button><button onClick={()=>supabase.auth.signOut()}>Sign out</button></div>
+   <div className="navRight"><button onClick={()=>setSettingsOpen(true)}>Settings</button><button onClick={()=>supabase.auth.signOut()}>Sign out</button></div>
   </nav>
 
   {settingsOpen&&<GoalSettings
    session={session} profile={profile} goal={activeGoal} target={currentTarget} currentWeightLbs={latest}
-   onClose={()=>setSettingsOpen(false)} onSaved={finishGoalSettings}
+   onClose={()=>setSettingsOpen(false)} onGoalSaved={finishGoalSettings} onProfileSaved={finishProfileSettings}
   />}
 
   <div className="dateNav" aria-label="Select log date">

@@ -24,7 +24,9 @@ export type ProfileInput={
  onboardingComplete:boolean
 }
 
-export function hasCompleteCalculationProfile(profile:Profile){
+export type CalculationProfileFields=Pick<Profile,'birth_year'|'energy_estimation_sex'|'height_inches'>
+
+export function hasCompleteCalculationProfile(profile:CalculationProfileFields){
  return profile.birth_year!==null&&profile.energy_estimation_sex!==null&&profile.height_inches!==null
 }
 
