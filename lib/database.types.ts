@@ -375,6 +375,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          activity_level: string
           birth_year: number | null
           created_at: string
           display_name: string | null
@@ -387,6 +388,7 @@ export type Database = {
           weight_unit: string
         }
         Insert: {
+          activity_level?: string
           birth_year?: number | null
           created_at?: string
           display_name?: string | null
@@ -399,6 +401,7 @@ export type Database = {
           weight_unit?: string
         }
         Update: {
+          activity_level?: string
           birth_year?: number | null
           created_at?: string
           display_name?: string | null
@@ -479,7 +482,24 @@ export type Database = {
       }
     }
     Functions: {
-      [_ in never]: never
+      replace_goal_target: {
+        Args: {
+          p_calorie_target_max: number
+          p_calorie_target_min: number
+          p_carb_target_g: number | null
+          p_effective_from: string
+          p_goal_id: string
+          p_protein_target_g: number
+          p_source: string
+          p_steps_target: number
+          p_target_date: string | null
+          p_target_weight_lbs: number
+          p_user_id: string
+          p_water_target_oz: number
+          p_weekly_weight_change_target_lbs: number | null
+        }
+        Returns: Database["public"]["Tables"]["goal_targets"]["Row"]
+      }
     }
     Enums: {
       [_ in never]: never

@@ -1,10 +1,11 @@
 {
-  "name": "cut165",
+  "name": "cut365",
   "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/*.test.ts",
     "start": "next start"
   },
   "dependencies": {

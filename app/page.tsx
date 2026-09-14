@@ -1,6 +1,8 @@
 'use client'
 import {FormEvent,useEffect,useMemo,useRef,useState} from 'react'
 import type {Session} from '@supabase/supabase-js'
+import Onboarding,{type AccountSetup} from './onboarding'
+import GoalSettings from './goal-settings'
 import {supabase} from '../lib/supabase'
 import {
  emptyDailyMetrics,getDailyMetrics,incrementDailyMetric,saveDailyMetrics,
@@ -19,6 +21,9 @@ import {
  getDailyNutritionTotals,getNutritionEntries,updateNutritionEntry,
  type DailyNutritionTotals,type MealSlot,type NutritionEntry
 } from '../lib/nutrition'
+import {completeProfileOnboarding,getProfile,type Profile} from '../lib/profile'
+import {getActiveGoal,getCurrentGoalTarget,getEffectiveGoalTarget,type Goal,type GoalTarget} from '../lib/goals'
+import {calendarDateInTimezone,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms} from '../lib/targets'
 
 type MetricKey='calories'|'protein_g'|'carbs_g'|DailyMetricDeltaKey
 type MealDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string}
@@ -82,6 +87,9 @@ const parseMetric=(value:string,label:string)=>{
  return parsed
 }
 const formatNumber=(value:number|null,digits=1)=>Number(value||0).toLocaleString(undefined,{maximumFractionDigits:digits})
+const formatTarget=(value:number|null|undefined,digits=1)=>value===null||value===undefined?'—':formatNumber(value,digits)
+const displayWeight=(pounds:number|null,unit:'lb'|'kg')=>pounds===null?null:unit==='kg'?poundsToKilograms(pounds):pounds
+const storedWeight=(value:number,unit:'lb'|'kg')=>unit==='kg'?kilogramsToPounds(value):value
 const displayDescription=(entry:NutritionEntry)=>entry.source==='legacy'?'Imported daily total':entry.description
 const entrySummary=(entry:NutritionEntry)=>{
  const values=[]
@@ -95,6 +103,16 @@ const entrySummary=(entry:NutritionEntry)=>{
 
 export default function Page(){
  const [session,setSession]=useState<Session|null>(null)
+ const [authLoading,setAuthLoading]=useState(true)
+ const [authMode,setAuthMode]=useState<'signin'|'signup'>('signin')
+ const [bootstrapStatus,setBootstrapStatus]=useState<'auth-loading'|'signed-out'|'profile-loading'|'onboarding-required'|'dashboard-ready'|'error'>('auth-loading')
+ const bootstrapSequence=useRef(0)
+ const [profile,setProfile]=useState<Profile|null>(null)
+ const [activeGoal,setActiveGoal]=useState<Goal|null>(null)
+ const [currentTarget,setCurrentTarget]=useState<GoalTarget|null>(null)
+ const [selectedTarget,setSelectedTarget]=useState<GoalTarget|null>(null)
+ const [targetLoading,setTargetLoading]=useState(false)
+ const [settingsOpen,setSettingsOpen]=useState(false)
  const [email,setEmail]=useState('')
  const [password,setPassword]=useState('')
  const [msg,setMsg]=useState('')
@@ -120,15 +138,31 @@ export default function Page(){
  const [editingId,setEditingId]=useState<string|null>(null)
  const [editDraft,setEditDraft]=useState<EditDraft|null>(null)
  const training=getTraining(selectedDate,workoutPlan)
- const today=localISO()
+ const today=profile?calendarDateInTimezone(profile.timezone):localISO()
  const isToday=selectedDate===today
  const selectedLabel=localDate(selectedDate).toLocaleDateString(undefined,{month:'short',day:'numeric'})
 
  useEffect(()=>{
-  supabase.auth.getSession().then(({data})=>setSession(data.session))
-  const {data}=supabase.auth.onAuthStateChange((_,nextSession)=>setSession(nextSession))
+  supabase.auth.getSession().then(({data})=>{setSession(data.session);setAuthLoading(false)})
+  const {data}=supabase.auth.onAuthStateChange((_,nextSession)=>{
+   setSession(nextSession)
+   setAuthLoading(false)
+  })
   return()=>data.subscription.unsubscribe()
  },[])
+
+ useEffect(()=>{
+  if(authLoading)return
+  if(!session){
+   bootstrapSequence.current++
+   setBootstrapStatus('signed-out')
+   setProfile(null)
+   setActiveGoal(null)
+   setCurrentTarget(null)
+   return
+  }
+  void loadAccount(session)
+ },[authLoading,session?.user.id])
 
  useEffect(()=>{
   selectedDateRef.current=selectedDate
@@ -136,11 +170,46 @@ export default function Page(){
   setNutritionNotice(null)
   setEditingId(null)
   setEditDraft(null)
-  if(session)void loadSelected(selectedDate)
- },[session,selectedDate])
+  if(session&&bootstrapStatus==='dashboard-ready'&&activeGoal)void loadSelected(selectedDate)
+ },[session?.user.id,selectedDate,bootstrapStatus,activeGoal])
  useEffect(()=>{
-  if(session)void loadWeightHistory().catch(error=>setMsg(errorText(error)))
- },[session])
+  if(session&&bootstrapStatus==='dashboard-ready')void loadWeightHistory().catch(error=>setMsg(errorText(error)))
+ },[session?.user.id,bootstrapStatus])
+
+ async function loadAccount(accountSession:Session){
+  const sequence=++bootstrapSequence.current
+  setBootstrapStatus('profile-loading')
+  setMsg('')
+  try{
+   const userId=accountSession.user.id
+   const [nextProfile,nextGoal]=await Promise.all([
+    getProfile(supabase,userId),getActiveGoal(supabase,userId)
+   ])
+   const canonicalToday=calendarDateInTimezone(nextProfile?.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC')
+   const nextTarget=nextGoal
+    ?await getCurrentGoalTarget(supabase,userId,nextGoal.id,canonicalToday)
+    :null
+   if(sequence!==bootstrapSequence.current)return
+   setProfile(nextProfile)
+   setActiveGoal(nextGoal)
+   setCurrentTarget(nextTarget)
+   setSelectedTarget(nextTarget)
+   selectedDateRef.current=canonicalToday
+   setSelectedDate(canonicalToday)
+   if(nextProfile&&nextGoal&&nextTarget){
+    const readyProfile=nextProfile.onboarding_complete
+     ?nextProfile
+     :await completeProfileOnboarding(supabase,userId)
+    if(sequence!==bootstrapSequence.current)return
+    setProfile(readyProfile)
+    setBootstrapStatus('dashboard-ready')
+   }else setBootstrapStatus('onboarding-required')
+  }catch(error){
+   if(sequence!==bootstrapSequence.current)return
+   setMsg(errorText(error))
+   setBootstrapStatus('error')
+  }
+ }
 
  async function loadWeightHistory(){
   if(!session)return
@@ -156,6 +225,7 @@ export default function Page(){
   setMeasurement(null)
   setWeightLbs(null)
   setWorkoutPlan(emptyWorkoutPlan(logDate))
+  setTargetLoading(true)
   setEntries([])
   setTotals(emptyDailyNutritionTotals(logDate))
   setNutritionLoading(true)
@@ -164,10 +234,11 @@ export default function Page(){
    getBodyMeasurement(supabase,session.user.id,logDate),
    getNutritionEntries(supabase,session.user.id,logDate),
    getDailyNutritionTotals(supabase,session.user.id,logDate),
-   getWorkoutPlan(supabase,session.user.id,logDate)
+   getWorkoutPlan(supabase,session.user.id,logDate),
+   activeGoal?getEffectiveGoalTarget(supabase,session.user.id,activeGoal.id,logDate):Promise.resolve(null)
   ])
   if(sequence!==loadSequence.current||selectedDateRef.current!==logDate)return
-  const [metricsResult,measurementResult,entriesResult,totalsResult,workoutResult]=results
+  const [metricsResult,measurementResult,entriesResult,totalsResult,workoutResult,targetResult]=results
   if(metricsResult.status==='fulfilled')setMetrics(metricsResult.value)
   else setMsg(errorText(metricsResult.reason))
   if(measurementResult.status==='fulfilled'){
@@ -180,6 +251,9 @@ export default function Page(){
   else setNutritionError(errorText(totalsResult.reason))
   if(workoutResult.status==='fulfilled')setWorkoutPlan(workoutResult.value)
   else setMsg(errorText(workoutResult.reason))
+  if(targetResult.status==='fulfilled')setSelectedTarget(targetResult.value)
+  else setMsg(errorText(targetResult.reason))
+  setTargetLoading(false)
   setNutritionLoading(false)
  }
 
@@ -198,10 +272,13 @@ export default function Page(){
  async function auth(event:FormEvent){
   event.preventDefault()
   setMsg('')
-  const signed=await supabase.auth.signInWithPassword({email,password})
-  if(!signed.error)return
+  if(authMode==='signin'){
+   const signed=await supabase.auth.signInWithPassword({email,password})
+   if(signed.error)setMsg(signed.error.message)
+   return
+  }
   const created=await supabase.auth.signUp({email,password})
-  setMsg(created.error?.message||'Account created. Check your inbox if confirmation is enabled.')
+  setMsg(created.error?.message||(created.data.session?'Account created.':'Account created. Check your inbox to confirm your email.'))
  }
 
  async function persist(
@@ -214,7 +291,7 @@ export default function Page(){
    saveDailyMetrics(supabase,session.user.id,nextMetrics),
    saveBodyWeight(supabase,{
     userId:session.user.id,logDate,weightLbs:nextWeight,
-    existing:nextMeasurement,isToday:logDate===localISO()
+    existing:nextMeasurement,isToday:logDate===today
    })
   ])
   if(weightResult.status==='fulfilled'){
@@ -238,17 +315,25 @@ export default function Page(){
 
  async function save(){await persist(metrics,weightLbs,measurement)}
 
- const latest=weightHistory[0]?.weight_lbs??180
- const lost=Math.max(0,180-latest)
- const progress=Math.max(0,Math.min(100,lost/15*100))
+ const targetForDay=targetLoading?null:selectedTarget
+ const startWeight=activeGoal?.start_weight_lbs??0
+ const targetWeight=activeGoal?.target_weight_lbs??0
+ const latest=weightHistory[0]?.weight_lbs??startWeight
+ const progressData=goalProgress(startWeight,targetWeight,latest)
+ const progress=progressData.visual
+ const weightUnit=profile?.weight_unit||'lb'
+ const displayedLatest=displayWeight(latest,weightUnit)??0
+ const displayedTarget=displayWeight(targetWeight,weightUnit)??0
+ const displayedChange=Math.abs(displayWeight(progressData.change,weightUnit)??0)
+ const changeLabel=targetWeight<startWeight?'down':targetWeight>startWeight?'up':'change'
  const status=useMemo(()=>{
-  if(totals.entry_count===0)return ['Open','open']
+  if(!targetForDay||totals.entry_count===0)return ['Open','open']
   if(totals.calories_unknown_count>0||totals.protein_unknown_count>0)return ['Partial','warn']
   const calories=Number(totals.calories||0)
-  if(calories<=1800&&Number(totals.protein_g||0)>=140)return ['On pace','good']
-  if(calories<=1950)return ['Close','warn']
+  if(calories<=targetForDay.calorie_target_max&&Number(totals.protein_g||0)>=targetForDay.protein_target_g)return ['On pace','good']
+  if(calories<=targetForDay.calorie_target_max+150)return ['Close','warn']
   return ['Over target','bad']
- },[totals])
+ },[totals,targetForDay])
 
  const metricNumber=(key:'steps'|'water_oz',value:string)=>{
   setMetrics(current=>({...current,[key]:value===''?null:Number(value)}))
@@ -261,6 +346,8 @@ export default function Page(){
    setMeasurement(null)
    setWeightLbs(null)
    setWorkoutPlan(emptyWorkoutPlan(next))
+   setSelectedTarget(null)
+   setTargetLoading(true)
    setEntries([])
    setTotals(emptyDailyNutritionTotals(next))
    setNutritionLoading(true)
@@ -376,7 +463,7 @@ export default function Page(){
     code:plan.code,
     completed:!plan.completed,
     session:plan.session,
-    isToday:logDate===localISO()
+    isToday:logDate===today
    })
    const refreshed=await getWorkoutPlan(supabase,session.user.id,logDate)
    if(selectedDateRef.current===logDate)setWorkoutPlan(refreshed)
@@ -438,33 +525,76 @@ export default function Page(){
   finally{setNutritionBusy(null)}
  }
 
- if(!session)return <main className="loginPage">
-  <div className="brand">cut<span>165</span></div>
+ function finishOnboarding(setup:AccountSetup){
+  const canonicalToday=calendarDateInTimezone(setup.profile.timezone)
+  setProfile(setup.profile)
+  setActiveGoal(setup.goal)
+  setCurrentTarget(setup.target)
+  setSelectedTarget(setup.target)
+  setTargetLoading(false)
+  selectedDateRef.current=canonicalToday
+  setSelectedDate(canonicalToday)
+  setBootstrapStatus('dashboard-ready')
+ }
+
+ function finishGoalSettings(nextGoal:Goal,nextTarget:GoalTarget){
+  setActiveGoal(nextGoal)
+  if(nextTarget.effective_from<=today&&(nextTarget.effective_to===null||today<nextTarget.effective_to)){
+   setCurrentTarget(nextTarget)
+  }
+  if(nextTarget.effective_from<=selectedDate&&(nextTarget.effective_to===null||selectedDate<nextTarget.effective_to)){
+   setSelectedTarget(nextTarget)
+  }
+  setSettingsOpen(false)
+ }
+
+ if(authLoading||bootstrapStatus==='auth-loading'||bootstrapStatus==='profile-loading')return <main className="bootstrapPage">
+  <div className="masterBrand">CUT365</div><p>Loading your plan…</p>
+ </main>
+
+ if(!session||bootstrapStatus==='signed-out')return <main className="loginPage">
+  <div className="masterBrand">CUT365</div>
   <section className="loginCopy">
-   <p className="eyebrow">PERSONAL CUT · 11.11.26</p>
+   <p className="eyebrow">YOUR PLAN · YOUR HISTORY</p>
    <h1>Build the habits.<br/>Keep the life.</h1>
-   <p className="lede">A quiet daily dashboard for reaching 165 without making food, drinks, or fitness your entire personality.</p>
+   <p className="lede">A quiet daily dashboard for reaching your goal without making food, drinks, or fitness your entire personality.</p>
   </section>
   <form onSubmit={auth} className="loginForm">
    <input type="email" placeholder="Email" value={email} onChange={event=>setEmail(event.target.value)} required/>
    <input type="password" placeholder="Password" value={password} onChange={event=>setPassword(event.target.value)} required/>
-   <button>Enter</button>
-   <small>{msg||'Sign in, or use a new email to create your account.'}</small>
+   <button>{authMode==='signin'?'Sign in':'Create account'}</button>
+   <small>{msg||`${authMode==='signin'?'Welcome back.':'Start with a free CUT365 account.'}`}</small>
+   <button type="button" className="authSwitch" onClick={()=>{setAuthMode(authMode==='signin'?'signup':'signin');setMsg('')}}>{authMode==='signin'?'New here? Create account':'Already have an account? Sign in'}</button>
   </form>
+ </main>
+
+ if(bootstrapStatus==='error')return <main className="bootstrapPage">
+  <div className="masterBrand">CUT365</div><p>{msg||'Could not load your account.'}</p><button onClick={()=>loadAccount(session)}>Try again</button>
+ </main>
+
+ if(bootstrapStatus==='onboarding-required')return <Onboarding session={session} onComplete={finishOnboarding}/>
+
+ if(!profile||!activeGoal||!currentTarget)return <main className="bootstrapPage">
+  <div className="masterBrand">CUT365</div><p>Finishing your dashboard…</p>
  </main>
 
  return <main className="app">
   <nav>
-   <div className="brand">cut<span>165</span></div>
-   <div className="navRight"><button onClick={()=>supabase.auth.signOut()}>Sign out</button></div>
+   <div><div className="brand">{goalIdentity(activeGoal.target_weight_lbs)}</div><small className="productMark">CUT365</small></div>
+   <div className="navRight"><button onClick={()=>setSettingsOpen(true)}>Goal settings</button><button onClick={()=>supabase.auth.signOut()}>Sign out</button></div>
   </nav>
+
+  {settingsOpen&&<GoalSettings
+   session={session} profile={profile} goal={activeGoal} target={currentTarget} currentWeightLbs={latest}
+   onClose={()=>setSettingsOpen(false)} onSaved={finishGoalSettings}
+  />}
 
   <div className="dateNav" aria-label="Select log date">
    <button onClick={()=>changeDate(-1)} aria-label="Previous day">‹</button>
    <strong>{localDate(selectedDate).toLocaleDateString(undefined,{month:'short',day:'numeric'}).toUpperCase()} <i>·</i> {training.dayLabel}</strong>
    <button onClick={()=>changeDate(1)} disabled={isToday} aria-label="Next day">›</button>
   </div>
-  {isToday&&new Date().getHours()<4&&<button className="yesterdayShortcut" onClick={()=>changeDate(-1)}>Still logging yesterday?</button>}
+  {isToday&&hourInTimezone(profile.timezone)<4&&<button className="yesterdayShortcut" onClick={()=>changeDate(-1)}>Still logging yesterday?</button>}
 
   <section className="trainingWrap">
    <p className="eyebrow">{isToday?"TODAY'S TRAINING":"PRESCRIBED TRAINING"}</p>
@@ -481,7 +611,7 @@ export default function Page(){
        <strong>{exercise}</strong><span>{sets}</span><span>{reps}</span>
       </div>)}
      </div>}
-     {training.kind==='recovery'&&<div className="trainingNote"><strong>Goal: 5,000+ steps</strong><p>Optional easy cardio / mobility</p></div>}
+     {training.kind==='recovery'&&<div className="trainingNote"><strong>Goal: {formatTarget(targetForDay?.steps_target,0)}+ steps</strong><p>Optional easy cardio / mobility</p></div>}
      <button className={`completeWorkout ${workoutPlan.completed?'done':''}`} onClick={toggleWorkout} disabled={workoutBusy}>
       <span>{workoutBusy?'Updating…':workoutPlan.completed?'Workout complete':'Mark workout complete'}</span><b>{workoutPlan.completed?'✓':'○'}</b>
      </button>
@@ -490,8 +620,8 @@ export default function Page(){
   </section>
 
   <section className={`goalCard p${Math.min(4,Math.floor(progress/25)+1)}`}>
-   <div><p className="eyebrow">PROGRESS TO YOUR GOAL</p><div className="weightLine"><strong>{latest}</strong><span>lb</span><i>→</i><b>165</b><span>lb</span></div></div>
-   <div className="goalMeta"><strong>{lost.toFixed(1)} lb</strong><span>down</span><strong>{progress.toFixed(0)}%</strong><span>complete</span></div>
+   <div><p className="eyebrow">PROGRESS TO YOUR GOAL{activeGoal.target_date?` · ${localDate(activeGoal.target_date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}`:''}</p><div className="weightLine"><strong>{formatNumber(displayedLatest)}</strong><span>{weightUnit}</span><i>→</i><b>{formatNumber(displayedTarget)}</b><span>{weightUnit}</span></div></div>
+   <div className="goalMeta"><strong>{displayedChange.toFixed(1)} {weightUnit}</strong><span>{changeLabel}</span><strong>{progress.toFixed(0)}%</strong><span>complete</span></div>
    <div className="bar"><i style={{width:`${progress}%`}}/></div>
   </section>
 
@@ -527,15 +657,15 @@ export default function Page(){
   </section>
 
   <section className="metrics">
-   <NutritionMetric kind="calories" icon="◒" label="Calories" value={totals.calories} unit="kcal" target="Goal · 1,650–1,800" partial={totals.calories_unknown_count>0} loading={nutritionLoading}/>
-   <NutritionMetric kind="protein" icon="◆" label="Protein" value={totals.protein_g} unit="g" target="Goal · 140–150+" partial={totals.protein_unknown_count>0} loading={nutritionLoading}/>
-   <Metric kind="steps" icon="↗" label="Steps" value={metrics.steps} unit="" target="Goal · 5,000+" onChange={value=>metricNumber('steps',value)}/>
-   <Metric kind="weight" icon="●" label="Weight" value={weightLbs} unit="lb" target="Destination · 165 lb" step=".1" onChange={value=>setWeightLbs(value===''?null:Number(value))}/>
+   <NutritionMetric kind="calories" icon="◒" label="Calories" value={totals.calories} unit="kcal" target={`Goal · ${formatTarget(targetForDay?.calorie_target_min,0)}–${formatTarget(targetForDay?.calorie_target_max,0)}`} partial={totals.calories_unknown_count>0} loading={nutritionLoading}/>
+   <NutritionMetric kind="protein" icon="◆" label="Protein" value={totals.protein_g} unit="g" target={`Goal · ${formatTarget(targetForDay?.protein_target_g)}+`} partial={totals.protein_unknown_count>0} loading={nutritionLoading}/>
+   <Metric kind="steps" icon="↗" label="Steps" value={metrics.steps} unit="" target={`Goal · ${formatTarget(targetForDay?.steps_target,0)}+`} onChange={value=>metricNumber('steps',value)}/>
+   <Metric kind="weight" icon="●" label="Weight" value={displayWeight(weightLbs,weightUnit)} unit={weightUnit} target={`Destination · ${formatNumber(displayedTarget)} ${weightUnit}`} step=".1" onChange={value=>setWeightLbs(value===''?null:storedWeight(Number(value),weightUnit))}/>
   </section>
 
   <section className="softGrid">
-   <label className="softCard"><span>Water <small>Goal · 80 oz/day</small></span><div><input type="number" value={metrics.water_oz??''} placeholder="0" onChange={event=>metricNumber('water_oz',event.target.value)}/><b>/ 80 oz</b></div></label>
-   <article className="softCard nutritionSoft"><span>Carbs <small>Flexible · 100–150g</small></span><div><strong>{nutritionLoading?'—':formatNumber(totals.carbs_g)}</strong><b>g</b>{totals.carbs_unknown_count>0&&<em>partial</em>}</div></article>
+   <label className="softCard"><span>Water <small>Goal · {formatTarget(targetForDay?.water_target_oz)} oz/day</small></span><div><input type="number" value={metrics.water_oz??''} placeholder="0" onChange={event=>metricNumber('water_oz',event.target.value)}/><b>/ {formatTarget(targetForDay?.water_target_oz)} oz</b></div></label>
+   <article className="softCard nutritionSoft"><span>Carbs <small>{targetForDay?.carb_target_g===null?'No fixed target':targetForDay?`Goal · ${formatTarget(targetForDay.carb_target_g)}g`:'Loading target'}</small></span><div><strong>{nutritionLoading?'—':formatNumber(totals.carbs_g)}</strong><b>g</b>{totals.carbs_unknown_count>0&&<em>partial</em>}</div></article>
   </section>
 
   <section className="drinkCard">

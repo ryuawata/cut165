@@ -1,9 +1,10 @@
 import './globals.css'
 import './nutrition.css'
+import './product.css'
 
 export const metadata={
- title:'CUT 165',
- description:'Personal cut dashboard'
+ title:'CUT365',
+ description:'Personal nutrition, movement, and goal dashboard'
 }
 
 export default function RootLayout({children}:{children:React.ReactNode}){
