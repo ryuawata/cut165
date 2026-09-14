@@ -21,9 +21,10 @@ import {
  getDailyNutritionTotals,getNutritionEntries,updateNutritionEntry,
  type DailyNutritionTotals,type MealSlot,type NutritionEntry
 } from '../lib/nutrition'
-import {completeProfileOnboarding,getProfile,type Profile} from '../lib/profile'
+import {completeProfileOnboarding,getProfile,hasCompleteCalculationProfile,type Profile} from '../lib/profile'
 import {getActiveGoal,getCurrentGoalTarget,getEffectiveGoalTarget,type Goal,type GoalTarget} from '../lib/goals'
 import {calendarDateInTimezone,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms} from '../lib/targets'
+import {decideAccountBootstrap} from '../lib/account-bootstrap'
 
 type MetricKey='calories'|'protein_g'|'carbs_g'|DailyMetricDeltaKey
 type MealDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string}
@@ -196,10 +197,17 @@ export default function Page(){
    setSelectedTarget(nextTarget)
    selectedDateRef.current=canonicalToday
    setSelectedDate(canonicalToday)
-   if(nextProfile&&nextGoal&&nextTarget){
-    const readyProfile=nextProfile.onboarding_complete
-     ?nextProfile
-     :await completeProfileOnboarding(supabase,userId)
+   const decision=decideAccountBootstrap({
+    hasProfile:nextProfile!==null,
+    hasActiveGoal:nextGoal!==null,
+    hasCurrentTarget:nextTarget!==null,
+    onboardingComplete:nextProfile?.onboarding_complete??false,
+    hasCalculationProfile:nextProfile?hasCompleteCalculationProfile(nextProfile):false
+   })
+   if(decision.status==='dashboard'&&nextProfile){
+    const readyProfile=decision.markOnboardingComplete
+     ?await completeProfileOnboarding(supabase,userId)
+     :nextProfile
     if(sequence!==bootstrapSequence.current)return
     setProfile(readyProfile)
     setBootstrapStatus('dashboard-ready')

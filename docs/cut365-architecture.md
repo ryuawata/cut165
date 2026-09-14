@@ -8,6 +8,8 @@ Goal targets are versioned historically in `goal_targets`. Each target has an in
 
 Phase 4 introduces the product bootstrap flow: authentication → profile → active goal → effective target. A new user first saves a profile and current body measurement, creates exactly one active goal, then requests an initial target version. The profile is marked complete only after all required records exist, so interrupted onboarding can safely resume without creating duplicate profiles or active goals. Existing users with a profile, active goal, and current target bypass onboarding; older complete account data is adopted without rewriting history.
 
+An idempotent compatibility migration discovers legacy users from `daily_logs` and `body_measurements`, derives the original goal start from their earliest historical date, and fills only missing profile, CUT165 goal, and initial target records. It never updates an existing profile, goal, or target. Because legacy history cannot establish birth year, energy-estimation sex, height, or a canonical carbohydrate point target, those values remain NULL. The compatibility profile remains `onboarding_complete = false`, but the complete goal/target tuple permits normal dashboard use. The application only finalizes onboarding automatically when the calculation profile fields genuinely exist. Goal Settings keeps the historical plan visible and blocks recalculation with an explanatory message until those details are supplied.
+
 Initial calorie, protein, carbohydrate, step, water, and weekly-change targets are calculated deterministically in shared application code using Mifflin–St Jeor energy estimation, an activity multiplier, conservative goal-rate limits, and calorie safety floors. They are planning estimates rather than medical advice. The calculation does not use BMI as a nutrition target.
 
 The database enforces a stable lower bound for `birth_year`. Whether a year is in the future depends on the current date, so the upper-bound check belongs in shared application validation rather than a static database constraint that would age poorly.
@@ -25,6 +27,8 @@ The deprecated `daily_logs` table remains intact for historical compatibility. B
 ## Privileged goal-target boundary
 
 Browser clients cannot insert, update, or delete `goal_targets`. They send an authenticated request to the narrow CUT365 goal-target route. The route independently validates the access token, resolves only the caller's profile, active goal, and latest eligible measurement, recalculates the complete target server-side, and invokes a single atomic database function with a server-only Supabase secret. The function is executable only by `service_role`, scopes every operation to the supplied user and active goal, closes the prior `[)` range, and inserts the replacement version in one transaction. It is not a general database proxy.
+
+Phase 4 deployment requires `SUPABASE_SECRET_KEY` in the server runtime. It must never use the `NEXT_PUBLIC_` prefix or be shipped to browser code.
 
 ## Application and AI boundaries
 

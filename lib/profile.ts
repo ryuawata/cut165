@@ -24,6 +24,10 @@ export type ProfileInput={
  onboardingComplete:boolean
 }
 
+export function hasCompleteCalculationProfile(profile:Profile){
+ return profile.birth_year!==null&&profile.energy_estimation_sex!==null&&profile.height_inches!==null
+}
+
 function narrowSex(value:string|null):EnergyEstimationSex|null{
  if(value===null)return null
  if(value==='male')return 'male'
