@@ -106,3 +106,19 @@ export async function completeProfileOnboarding(
  if(error)throw error
  return normalizeProfile(data)
 }
+
+export async function saveCompatibilityTimezone(
+ client:TypedSupabaseClient,userId:string,expectedTimezone:string,timezone:string
+){
+ validateTimezone(timezone)
+ const {data,error}=await client.from('profiles').update({timezone})
+  .eq('user_id',userId)
+  .eq('onboarding_complete',false)
+  .eq('timezone',expectedTimezone)
+  .select().maybeSingle()
+ if(error)throw error
+ if(data)return normalizeProfile(data)
+ const currentProfile=await getProfile(client,userId)
+ if(!currentProfile)throw new Error('Profile was not found while setting its timezone.')
+ return currentProfile
+}

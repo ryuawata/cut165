@@ -21,10 +21,12 @@ import {
  getDailyNutritionTotals,getNutritionEntries,updateNutritionEntry,
  type DailyNutritionTotals,type MealSlot,type NutritionEntry
 } from '../lib/nutrition'
-import {completeProfileOnboarding,getProfile,hasCompleteCalculationProfile,type Profile} from '../lib/profile'
+import {
+ completeProfileOnboarding,getProfile,hasCompleteCalculationProfile,saveCompatibilityTimezone,type Profile
+} from '../lib/profile'
 import {getActiveGoal,getCurrentGoalTarget,getEffectiveGoalTarget,type Goal,type GoalTarget} from '../lib/goals'
 import {calendarDateInTimezone,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms} from '../lib/targets'
-import {decideAccountBootstrap} from '../lib/account-bootstrap'
+import {decideAccountBootstrap,decideCompatibilityTimezone} from '../lib/account-bootstrap'
 
 type MetricKey='calories'|'protein_g'|'carbs_g'|DailyMetricDeltaKey
 type MealDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string}
@@ -186,32 +188,60 @@ export default function Page(){
    const [nextProfile,nextGoal]=await Promise.all([
     getProfile(supabase,userId),getActiveGoal(supabase,userId)
    ])
-   const canonicalToday=calendarDateInTimezone(nextProfile?.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC')
-   const nextTarget=nextGoal
-    ?await getCurrentGoalTarget(supabase,userId,nextGoal.id,canonicalToday)
+   const detectedTimezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'
+   const persistedTimezone=nextProfile?.timezone||detectedTimezone
+   const persistedToday=calendarDateInTimezone(persistedTimezone)
+   let nextTarget=nextGoal
+    ?await getCurrentGoalTarget(supabase,userId,nextGoal.id,persistedToday)
     :null
    if(sequence!==bootstrapSequence.current)return
-   setProfile(nextProfile)
-   setActiveGoal(nextGoal)
-   setCurrentTarget(nextTarget)
-   setSelectedTarget(nextTarget)
-   selectedDateRef.current=canonicalToday
-   setSelectedDate(canonicalToday)
    const decision=decideAccountBootstrap({
     hasProfile:nextProfile!==null,
     hasActiveGoal:nextGoal!==null,
     hasCurrentTarget:nextTarget!==null,
+    currentTargetIsLegacy:nextTarget?.source==='legacy',
     onboardingComplete:nextProfile?.onboarding_complete??false,
     hasCalculationProfile:nextProfile?hasCompleteCalculationProfile(nextProfile):false
    })
+   let readyProfile=nextProfile
    if(decision.status==='dashboard'&&nextProfile){
-    const readyProfile=decision.markOnboardingComplete
-     ?await completeProfileOnboarding(supabase,userId)
+    const timezoneDecision=decideCompatibilityTimezone({
+     persistedTimezone:nextProfile.timezone,
+     detectedTimezone,
+     legacyCompatibility:decision.legacyCompatibility
+    })
+    readyProfile=timezoneDecision.shouldPersist
+     ?await saveCompatibilityTimezone(
+       supabase,userId,nextProfile.timezone,timezoneDecision.timezone
+      )
      :nextProfile
     if(sequence!==bootstrapSequence.current)return
+    if(decision.markOnboardingComplete){
+     readyProfile=await completeProfileOnboarding(supabase,userId)
+     if(sequence!==bootstrapSequence.current)return
+    }
+    const canonicalToday=calendarDateInTimezone(readyProfile.timezone)
+    if(nextGoal&&canonicalToday!==persistedToday){
+     nextTarget=await getCurrentGoalTarget(supabase,userId,nextGoal.id,canonicalToday)
+     if(sequence!==bootstrapSequence.current)return
+    }
     setProfile(readyProfile)
+    setActiveGoal(nextGoal)
+    setCurrentTarget(nextTarget)
+    setSelectedTarget(nextTarget)
+    selectedDateRef.current=canonicalToday
+    setSelectedDate(canonicalToday)
     setBootstrapStatus('dashboard-ready')
-   }else setBootstrapStatus('onboarding-required')
+   }else{
+    const canonicalToday=calendarDateInTimezone(persistedTimezone)
+    setProfile(nextProfile)
+    setActiveGoal(nextGoal)
+    setCurrentTarget(nextTarget)
+    setSelectedTarget(nextTarget)
+    selectedDateRef.current=canonicalToday
+    setSelectedDate(canonicalToday)
+    setBootstrapStatus('onboarding-required')
+   }
   }catch(error){
    if(sequence!==bootstrapSequence.current)return
    setMsg(errorText(error))

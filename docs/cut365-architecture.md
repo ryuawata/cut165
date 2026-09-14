@@ -14,7 +14,7 @@ Initial calorie, protein, carbohydrate, step, water, and weekly-change targets a
 
 The database enforces a stable lower bound for `birth_year`. Whether a year is in the future depends on the current date, so the upper-bound check belongs in shared application validation rather than a static database constraint that would age poorly.
 
-The user-selected `log_date` is the authoritative calendar date for daily logging. A profile's IANA `timezone` is used when server-side workflows need to determine concepts such as today or yesterday; timestamps alone must not silently reassign a record to another log date.
+The user-selected `log_date` is the authoritative calendar date for daily logging. A profile's IANA `timezone` is used when server-side workflows need to determine concepts such as today or yesterday; timestamps alone must not silently reassign a record to another log date. For an incomplete legacy compatibility profile only, the schema-default `UTC` value is treated as a placeholder on first browser load: CUT365 adopts and persists the browser-detected IANA timezone. An established profile or previously customized timezone is never overwritten, a browser genuinely reporting UTC remains UTC, and historical `log_date` values are not rewritten.
 
 Dashboard goal targets are effective-dated with inclusive start and exclusive end semantics. Historical dates load the target that covered that date; today's dashboard loads today's target. Goal progress uses the active goal's start and target weights plus the latest body measurement and supports both loss and gain directions. The personalized CUT identity is derived at runtime from the active target weight, while CUT365 remains the product brand.
 

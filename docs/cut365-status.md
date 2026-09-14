@@ -22,6 +22,7 @@
 - Authenticated clients retain read-only access to effective-dated goal targets. A narrow authenticated server route validates the caller and uses a server-only credential to invoke the atomic target-versioning function.
 - Legacy CUT165 users are bootstrapped from historical dates without invented demographic data. Their incomplete compatibility profile does not block dashboard access and is not falsely marked complete.
 - Profile Settings completes legacy calculation fields without changing goal history or recalculating targets; goal editing unlocks immediately after the profile save.
+- An incomplete legacy compatibility profile may replace the schema-default `UTC` placeholder with the browser-detected IANA timezone once; completed or customized profiles and historical `log_date` values remain unchanged.
 - Phase 4 deployment requires a server-only `SUPABASE_SECRET_KEY`; it must never be exposed as a `NEXT_PUBLIC_` variable.
 - Keep AI and photo logging out of this phase.
 
