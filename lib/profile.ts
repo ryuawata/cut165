@@ -7,10 +7,12 @@ type TypedSupabaseClient=SupabaseClient<Database>
 export type EnergyEstimationSex='male'|'female'
 export type WeightUnit='lb'|'kg'
 export type ActivityLevel='sedentary'|'light'|'moderate'|'very_active'
-export type Profile=Omit<ProfileRow,'energy_estimation_sex'|'weight_unit'|'activity_level'>&{
+export type ExerciseFrequency='none'|'one_to_two'|'three_to_four'|'five_plus'
+export type Profile=Omit<ProfileRow,'energy_estimation_sex'|'weight_unit'|'activity_level'|'exercise_frequency'>&{
  energy_estimation_sex:EnergyEstimationSex|null
  weight_unit:WeightUnit
  activity_level:ActivityLevel
+ exercise_frequency:ExerciseFrequency
 }
 
 export type ProfileInput={
@@ -21,6 +23,7 @@ export type ProfileInput={
  timezone:string
  weightUnit:WeightUnit
  activityLevel:ActivityLevel
+ exerciseFrequency:ExerciseFrequency
  onboardingComplete:boolean
 }
 
@@ -55,8 +58,14 @@ function normalizeProfile(row:ProfileRow):Profile{
   ...row,
   energy_estimation_sex:narrowSex(row.energy_estimation_sex),
   weight_unit:narrowUnit(row.weight_unit),
-  activity_level:narrowActivity(row.activity_level)
+  activity_level:narrowActivity(row.activity_level),
+  exercise_frequency:narrowExerciseFrequency(row.exercise_frequency)
  }
+}
+
+function narrowExerciseFrequency(value:string):ExerciseFrequency{
+ if(value==='none'||value==='one_to_two'||value==='three_to_four'||value==='five_plus')return value
+ throw new Error('Profile contains an unsupported exercise frequency.')
 }
 
 function validateTimezone(timezone:string){
@@ -92,8 +101,16 @@ export async function saveProfile(client:TypedSupabaseClient,userId:string,input
   timezone:input.timezone,
   weight_unit:input.weightUnit,
   activity_level:input.activityLevel,
+  exercise_frequency:input.exerciseFrequency,
   onboarding_complete:input.onboardingComplete
  },{onConflict:'user_id'}).select().eq('user_id',userId).single()
+ if(error)throw error
+ return normalizeProfile(data)
+}
+
+export async function dismissGettingStarted(client:TypedSupabaseClient,userId:string){
+ const {data,error}=await client.from('profiles').update({getting_started_dismissed:true})
+  .eq('user_id',userId).select().single()
  if(error)throw error
  return normalizeProfile(data)
 }

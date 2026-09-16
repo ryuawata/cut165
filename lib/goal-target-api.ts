@@ -6,6 +6,7 @@ export type GoalTargetRequest={
  targetWeightLbs:number
  targetDate:string|null
  stepsTarget:number
+ waterTargetOz?:number
  source:Extract<GoalTargetSource,'onboarding'|'manual'>
 }
 

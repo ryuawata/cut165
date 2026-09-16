@@ -22,7 +22,7 @@ import {
  type DailyNutritionTotals,type MealSlot,type NutritionEntry
 } from '../lib/nutrition'
 import {
- completeProfileOnboarding,getProfile,hasCompleteCalculationProfile,saveCompatibilityTimezone,type Profile
+ completeProfileOnboarding,dismissGettingStarted,getProfile,hasCompleteCalculationProfile,saveCompatibilityTimezone,type Profile
 } from '../lib/profile'
 import {getActiveGoal,getCurrentGoalTarget,getEffectiveGoalTarget,type Goal,type GoalTarget} from '../lib/goals'
 import {calendarDateInTimezone,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms} from '../lib/targets'
@@ -317,6 +317,13 @@ export default function Page(){
   }
   const created=await supabase.auth.signUp({email,password})
   setMsg(created.error?.message||(created.data.session?'Account created.':'Account created. Check your inbox to confirm your email.'))
+ }
+
+ async function dismissFirstDay(){
+  if(!session)return
+  try{
+   setProfile(await dismissGettingStarted(supabase,session.user.id))
+  }catch(error){setMsg(errorText(error))}
  }
 
  async function persist(
@@ -637,6 +644,12 @@ export default function Page(){
    <button onClick={()=>changeDate(1)} disabled={isToday} aria-label="Next day">›</button>
   </div>
   {isToday&&hourInTimezone(profile.timezone)<4&&<button className="yesterdayShortcut" onClick={()=>changeDate(-1)}>Still logging yesterday?</button>}
+
+  {isToday&&currentTarget.source==='onboarding'&&!profile.getting_started_dismissed&&
+   <aside className="gettingStarted">
+    <div className="gettingStartedHead"><strong>Start your first day</strong><button onClick={dismissFirstDay} aria-label="Dismiss getting started">×</button></div>
+    <p>Log a meal · Add your weight · Add your steps</p>
+   </aside>}
 
   <section className="trainingWrap">
    <p className="eyebrow">{isToday?"TODAY'S TRAINING":"PRESCRIBED TRAINING"}</p>

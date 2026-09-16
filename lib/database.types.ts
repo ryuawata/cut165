@@ -376,6 +376,8 @@ export type Database = {
       profiles: {
         Row: {
           activity_level: string
+          exercise_frequency: string
+          getting_started_dismissed: boolean
           birth_year: number | null
           created_at: string
           display_name: string | null
@@ -389,6 +391,8 @@ export type Database = {
         }
         Insert: {
           activity_level?: string
+          exercise_frequency?: string
+          getting_started_dismissed?: boolean
           birth_year?: number | null
           created_at?: string
           display_name?: string | null
@@ -402,6 +406,8 @@ export type Database = {
         }
         Update: {
           activity_level?: string
+          exercise_frequency?: string
+          getting_started_dismissed?: boolean
           birth_year?: number | null
           created_at?: string
           display_name?: string | null

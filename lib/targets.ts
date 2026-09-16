@@ -10,6 +10,7 @@ export type TargetCalculationInput={
  goalType:GoalType
  activityLevel:ActivityLevel
  stepsTarget:number
+ waterTargetOz?:number
  targetDate:string|null
  effectiveDate:string
 }
@@ -22,6 +23,8 @@ export type CalculatedTargets={
  stepsTarget:number
  waterTargetOz:number
  weeklyWeightChangeTargetLbs:number
+ maintenanceCalories:number
+ primaryCalorieTarget:number
 }
 
 const isoPattern=/^\d{4}-\d{2}-\d{2}$/
@@ -33,6 +36,8 @@ const activityMultiplier:Record<ActivityLevel,number>={
 }
 const clamp=(value:number,min:number,max:number)=>Math.min(max,Math.max(min,value))
 const roundTo=(value:number,increment:number)=>Math.round(value/increment)*increment
+export const recommendedSteps=(activity:ActivityLevel)=>({sedentary:5000,light:7000,moderate:8000,very_active:10000})[activity]
+export const recommendedWaterOz=(currentWeightLbs:number)=>clamp(roundTo(currentWeightLbs*.5,5),64,160)
 
 function utcDate(iso:string){
  if(!isoPattern.test(iso))throw new Error('Use a valid calendar date.')
@@ -68,9 +73,25 @@ export function validateTargetInputs(input:TargetCalculationInput){
  if(!Number.isInteger(input.stepsTarget)||input.stepsTarget<1000||input.stepsTarget>100000){
   throw new Error('Step target must be a whole number between 1,000 and 100,000.')
  }
+ if(input.waterTargetOz!==undefined&&(!Number.isFinite(input.waterTargetOz)||input.waterTargetOz<1||input.waterTargetOz>500)){
+  throw new Error('Water target must be between 1 and 500 oz.')
+ }
  if(input.targetDate&&utcDate(input.targetDate)<=effective){
   throw new Error('Target date must be after the goal start date.')
  }
+}
+
+export function resolveSafeTargetDate(input:TargetCalculationInput){
+ if(input.goalType==='maintain'||!input.targetDate)return {targetDate:null,paceWarning:false}
+ validateTargetInputs(input)
+ const safeMaximum=input.goalType==='cut'
+  ?Math.min(1.5,input.currentWeightLbs*.01)
+  :Math.min(.75,input.currentWeightLbs*.005)
+ const minimumDays=Math.ceil(Math.abs(input.targetWeightLbs-input.currentWeightLbs)/safeMaximum*7)
+ const recommendedDate=shiftCalendarDate(input.effectiveDate,minimumDays)
+ return input.targetDate<recommendedDate
+  ?{targetDate:recommendedDate,paceWarning:true}
+  :{targetDate:input.targetDate,paceWarning:false}
 }
 
 function targetWeeklyChange(input:TargetCalculationInput){
@@ -85,7 +106,8 @@ function targetWeeklyChange(input:TargetCalculationInput){
   const weeks=(utcDate(input.targetDate).getTime()-utcDate(input.effectiveDate).getTime())/(7*86400000)
   magnitude=clamp(Math.abs(input.targetWeightLbs-input.currentWeightLbs)/weeks,.1,safeMaximum)
  }
- return roundTo(input.goalType==='cut'?-magnitude:magnitude,.05)
+ const safeRoundedMagnitude=Math.floor((magnitude+1e-9)/.05)*.05
+ return input.goalType==='cut'?-safeRoundedMagnitude:safeRoundedMagnitude
 }
 
 export function calculateInitialTargets(input:TargetCalculationInput):CalculatedTargets{
@@ -104,7 +126,7 @@ export function calculateInitialTargets(input:TargetCalculationInput):Calculated
  const proteinTargetG=clamp(roundTo(input.currentWeightLbs*proteinFactor,5),80,250)
  const fatCalories=calorieTargetMax*.25
  const carbTargetG=Math.max(75,roundTo((calorieTargetMax-proteinTargetG*4-fatCalories)/4,5))
- const waterTargetOz=clamp(roundTo(input.currentWeightLbs*.5,5),64,160)
+ const waterTargetOz=input.waterTargetOz??recommendedWaterOz(input.currentWeightLbs)
  return {
   calorieTargetMin,
   calorieTargetMax,
@@ -112,7 +134,9 @@ export function calculateInitialTargets(input:TargetCalculationInput):Calculated
   carbTargetG,
   stepsTarget:input.stepsTarget,
   waterTargetOz,
-  weeklyWeightChangeTargetLbs:weeklyChange
+  weeklyWeightChangeTargetLbs:weeklyChange,
+  maintenanceCalories:roundTo(maintenance,10),
+  primaryCalorieTarget:roundTo((calorieTargetMin+calorieTargetMax)/2,10)
  }
 }
 

@@ -1,7 +1,7 @@
 import {createClient} from '@supabase/supabase-js'
 import {NextRequest,NextResponse} from 'next/server'
 import type {Database,Tables} from '../../../lib/database.types'
-import {calculateInitialTargets,calendarDateInTimezone,shiftCalendarDate} from '../../../lib/targets'
+import {calculateInitialTargets,calendarDateInTimezone,resolveSafeTargetDate,shiftCalendarDate} from '../../../lib/targets'
 import type {ActivityLevel,EnergyEstimationSex} from '../../../lib/profile'
 import type {GoalType} from '../../../lib/goals'
 
@@ -18,11 +18,12 @@ function readRequest(value:unknown){
  const targetWeightLbs=typeof body.targetWeightLbs==='number'?body.targetWeightLbs:NaN
  const targetDate=body.targetDate===null?null:typeof body.targetDate==='string'?body.targetDate:''
  const stepsTarget=typeof body.stepsTarget==='number'?body.stepsTarget:NaN
+ const waterTargetOz=body.waterTargetOz===undefined?undefined:typeof body.waterTargetOz==='number'?body.waterTargetOz:NaN
  const source=body.source==='onboarding'||body.source==='manual'?body.source:null
  if(!goalId||!isoPattern.test(effectiveFrom)||(targetDate!==null&&!isoPattern.test(targetDate))||!source){
   throw new Error('Invalid goal-target request.')
  }
- return {goalId,effectiveFrom,targetWeightLbs,targetDate,stepsTarget,source}
+ return {goalId,effectiveFrom,targetWeightLbs,targetDate,stepsTarget,waterTargetOz,source}
 }
 
 function narrowGoalType(value:string):GoalType{
@@ -94,7 +95,7 @@ export async function POST(request:NextRequest){
   }
   if(!weightResult.data)throw new Error('Record a current weight before calculating targets.')
 
-  const calculated=calculateInitialTargets({
+  const calculationInput={
    birthYear:profile.birth_year,
    sex:narrowSex(profile.energy_estimation_sex),
    heightInches:profile.height_inches,
@@ -103,16 +104,19 @@ export async function POST(request:NextRequest){
    goalType:narrowGoalType(goal.goal_type),
    activityLevel:narrowActivity(profile.activity_level),
    stepsTarget:input.stepsTarget,
+   waterTargetOz:input.waterTargetOz,
    targetDate:input.targetDate,
    effectiveDate:input.effectiveFrom
-  })
+  }
+  const pace=resolveSafeTargetDate(calculationInput)
+  const calculated=calculateInitialTargets({...calculationInput,targetDate:pace.targetDate})
 
   const {data:target,error:targetError}=await admin.rpc('replace_goal_target',{
    p_user_id:userId,
    p_goal_id:goal.id,
    p_effective_from:input.effectiveFrom,
    p_target_weight_lbs:input.targetWeightLbs,
-   p_target_date:input.targetDate,
+   p_target_date:pace.targetDate,
    p_calorie_target_min:calculated.calorieTargetMin,
    p_calorie_target_max:calculated.calorieTargetMax,
    p_protein_target_g:calculated.proteinTargetG,

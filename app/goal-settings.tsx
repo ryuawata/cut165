@@ -38,6 +38,7 @@ export default function GoalSettings({session,profile,goal,target,currentWeightL
  const [timezone,setTimezone]=useState(profile.timezone)
  const [weightUnit,setWeightUnit]=useState<WeightUnit>(profile.weight_unit)
  const [activityLevel,setActivityLevel]=useState<ActivityLevel>(profile.activity_level)
+ const [exerciseFrequency,setExerciseFrequency]=useState(profile.exercise_frequency)
  const [profileBusy,setProfileBusy]=useState(false)
  const [profileError,setProfileError]=useState('')
  const [profileNotice,setProfileNotice]=useState('')
@@ -97,6 +98,7 @@ export default function GoalSettings({session,profile,goal,target,currentWeightL
     timezone,
     weightUnit,
     activityLevel,
+    exerciseFrequency,
     onboardingComplete:true
    })
    onProfileSaved(nextProfile)
@@ -122,6 +124,7 @@ export default function GoalSettings({session,profile,goal,target,currentWeightL
     <label>Timezone<input value={timezone} onChange={event=>setTimezone(event.target.value)} required/></label>
     <label>Weight unit<select value={weightUnit} onChange={event=>setWeightUnit(event.target.value as WeightUnit)}><option value="lb">Pounds</option><option value="kg">Kilograms</option></select></label>
     <label>Usual activity<select value={activityLevel} onChange={event=>setActivityLevel(event.target.value as ActivityLevel)}><option value="sedentary">Mostly seated</option><option value="light">Lightly active</option><option value="moderate">Moderately active</option><option value="very_active">Very active</option></select></label>
+    <label>Exercise frequency<select value={exerciseFrequency} onChange={event=>setExerciseFrequency(event.target.value as Profile['exercise_frequency'])}><option value="none">None</option><option value="one_to_two">1–2 days/week</option><option value="three_to_four">3–4 days/week</option><option value="five_plus">5+ days/week</option></select></label>
     {profileError&&<p className="formError" role="alert">{profileError}</p>}
     <button className="primaryAction" disabled={profileBusy}>{profileBusy?'Saving…':'Save profile'} <b>→</b></button>
    </form>:<form onSubmit={save}>
