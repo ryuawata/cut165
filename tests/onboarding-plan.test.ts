@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import {goalTypeForChoice,onboardingTargetValues,reuseOnboardingTarget} from '../lib/onboarding-plan.ts'
+import {goalTypeForChoice,onboardingTargetValues,matchesOnboardingPlan} from '../lib/onboarding-plan.ts'
 import {calculateInitialTargets,recommendedSteps,resolveSafeTargetDate} from '../lib/targets.ts'
 import {decideAccountBootstrap} from '../lib/account-bootstrap.ts'
 
@@ -58,10 +58,29 @@ test('aggressive target dates move to the fastest safe recommendation',()=>{
  assert.ok(Math.abs(targets.weeklyWeightChangeTargetLbs)<=1.5)
 })
 
-test('completion retry reuses an existing onboarding target',()=>{
- assert.equal(reuseOnboardingTarget('onboarding'),true)
- assert.equal(reuseOnboardingTarget('legacy'),false)
- assert.equal(reuseOnboardingTarget(null),false)
+test('an interrupted onboarding reuses only the plan shown in the preview',()=>{
+ const plan=calculateInitialTargets(base)
+ const goal={
+  goal_type:'cut',start_weight_lbs:180,target_weight_lbs:165,
+  start_date:base.effectiveDate,target_date:null
+ } as Parameters<typeof matchesOnboardingPlan>[0]['goal']
+ const target={
+  source:'onboarding',effective_from:base.effectiveDate,effective_to:null,
+  calorie_target_min:plan.calorieTargetMin,calorie_target_max:plan.calorieTargetMax,
+  protein_target_g:plan.proteinTargetG,carb_target_g:plan.carbTargetG,
+  steps_target:plan.stepsTarget,water_target_oz:plan.waterTargetOz,
+  weekly_weight_change_target_lbs:plan.weeklyWeightChangeTargetLbs
+ } as Parameters<typeof matchesOnboardingPlan>[0]['target']
+ const input={goal,target,goalType:'cut' as const,startWeightLbs:180,
+  targetWeightLbs:165,startDate:base.effectiveDate,targetDate:null,plan}
+ assert.equal(matchesOnboardingPlan(input),true)
+ assert.equal(matchesOnboardingPlan({...input,target:null}),true)
+ assert.equal(matchesOnboardingPlan({...input,goalType:'bulk'}),false)
+ assert.equal(matchesOnboardingPlan({...input,startWeightLbs:185}),false)
+ assert.equal(matchesOnboardingPlan({...input,targetDate:'2026-12-01'}),false)
+ assert.equal(matchesOnboardingPlan({...input,plan:{...plan,stepsTarget:9300}}),false)
+ assert.equal(matchesOnboardingPlan({...input,plan:{...plan,waterTargetOz:95}}),false)
+ assert.equal(matchesOnboardingPlan({...input,target:{...target!,source:'legacy'}}),false)
 })
 
 test('legacy CUT165 compatibility still bypasses new-user onboarding',()=>{

@@ -3,11 +3,11 @@ import {FormEvent,useMemo,useState} from 'react'
 import type {Session} from '@supabase/supabase-js'
 import {supabase} from '../lib/supabase'
 import {getBodyMeasurement,saveBodyWeight} from '../lib/body-measurements'
-import {createInitialGoal,getEffectiveGoalTarget,type Goal,type GoalTarget} from '../lib/goals'
+import {createInitialGoal,getActiveGoal,getEffectiveGoalTarget,transitionGoal,type Goal,type GoalTarget} from '../lib/goals'
 import {createGoalTargetVersion} from '../lib/goal-target-api'
 import {completeProfileOnboarding,saveProfile,type ActivityLevel,type EnergyEstimationSex,type ExerciseFrequency,type Profile,type WeightUnit} from '../lib/profile'
 import {calculateInitialTargets,calendarDateInTimezone,kilogramsToPounds,recommendedSteps,recommendedWaterOz,resolveSafeTargetDate} from '../lib/targets'
-import {goalTypeForChoice,onboardingTargetValues,reuseOnboardingTarget,type GoalChoice} from '../lib/onboarding-plan'
+import {goalTypeForChoice,onboardingTargetValues,matchesOnboardingPlan,type GoalChoice} from '../lib/onboarding-plan'
 
 export type AccountSetup={profile:Profile;goal:Goal;target:GoalTarget}
 const detectedTimezone=()=>Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'
@@ -101,13 +101,32 @@ export default function Onboarding({session,onComplete}:{session:Session;onCompl
     userId:session.user.id,logDate:effectiveDate,weightLbs:parsed.currentWeightLbs,
     existing:existingMeasurement,isToday:true
    })
-   const goal=await createInitialGoal(supabase,{
-    userId:session.user.id,goalType,startWeightLbs:parsed.currentWeightLbs,
-    targetWeightLbs:parsed.targetWeightLbs,startDate:effectiveDate,targetDate:pace.targetDate
+   const oldGoal=await getActiveGoal(supabase,session.user.id)
+   const oldTarget=oldGoal
+    ?await getEffectiveGoalTarget(supabase,session.user.id,oldGoal.id,effectiveDate)
+    :null
+   if(oldGoal&&oldTarget&&oldTarget.source!=='onboarding'){
+    throw new Error('An existing plan needs review before onboarding can continue.')
+   }
+   const samePlan=oldGoal&&matchesOnboardingPlan({
+    goal:oldGoal,target:oldTarget,goalType,startWeightLbs:parsed.currentWeightLbs,
+    targetWeightLbs:parsed.targetWeightLbs,startDate:effectiveDate,
+    targetDate:pace.targetDate,plan
    })
-   const existingTarget=await getEffectiveGoalTarget(supabase,session.user.id,goal.id,effectiveDate)
-   const result=reuseOnboardingTarget(existingTarget?.source??null)&&existingTarget
-    ?{goal,target:existingTarget}
+   let goal:Goal
+   if(oldGoal&&samePlan){
+    goal=oldGoal
+   }else{
+    if(oldGoal){
+     await transitionGoal(supabase,{userId:session.user.id,goalId:oldGoal.id,status:'abandoned'})
+    }
+    goal=await createInitialGoal(supabase,{
+     userId:session.user.id,goalType,startWeightLbs:parsed.currentWeightLbs,
+     targetWeightLbs:parsed.targetWeightLbs,startDate:effectiveDate,targetDate:pace.targetDate
+    })
+   }
+   const result=samePlan&&oldTarget
+    ?{goal,target:oldTarget}
     :await createGoalTargetVersion(session.access_token,{
      goalId:goal.id,effectiveFrom:effectiveDate,targetWeightLbs:parsed.targetWeightLbs,
      targetDate:pace.targetDate,stepsTarget:plan.stepsTarget,
