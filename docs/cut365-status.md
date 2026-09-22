@@ -9,7 +9,7 @@
 - Phase 4 profiles, goals, onboarding, and dynamic targets: live.
 - Phase 4.5 new-user onboarding hardening: live.
 - Phase 4.6 beta coaching and domain cutover: complete on `main`.
-- Current phase: Phase 4.7 beta UX and personalization on the `cut365-phase-4-7` feature branch. Its additive migration is intentionally unapplied pending review.
+- Current phase: Phase 4.7.1 restores Full Body C on the `cut365-phase-4-7-1` feature branch. Its additive constraint migration is intentionally unapplied pending review.
 
 ## Decisions
 
@@ -25,8 +25,8 @@
 - Profile Settings completes legacy calculation fields without changing goal history or recalculating targets; goal editing unlocks immediately after the profile save.
 - An incomplete legacy compatibility profile may replace the schema-default `UTC` placeholder with the browser-detected IANA timezone once; completed or customized profiles and historical `log_date` values remain unchanged.
 - Phase 4.5 adds a constrained exercise-frequency profile value and a persistent first-day prompt dismissal. Exercise frequency does not influence calorie estimates. New-user plans expose an editable step and water target, and unsafe requested dates are constrained to the fastest allowed pace.
-- Phase 4.7 caps the full-body recommendation at 2 weekly sessions for `none` and `one_to_two`, and 3 for `three_to_four` and `five_plus`. Two-session plans require two full rest calendar days; three-session plans require one. Weekly completion and recovery spacing include completed A/B, Full Body C, and legacy strength sessions in the profile timezone, while only completed A/B sessions advance the sequence. Next-workout sequence and today's eligibility are separate facts.
-- Full Body A/B starter templates remain immutable fallbacks. Users may persist owned overrides, while newly completed sessions store the effective workout snapshot so later edits cannot rewrite history. Legacy strength stays distinct and never advances A/B rotation.
+- Phase 4.7 caps the full-body recommendation at 2 weekly sessions for `none` and `one_to_two`, and 3 for `three_to_four` and `five_plus`. Two-session plans require two full rest calendar days; three-session plans require one. Weekly completion and recovery spacing include completed A/B/C and legacy strength sessions in the profile timezone, while only completed A/B/C sessions advance the sequence. Next-workout sequence and today's eligibility are separate facts, and the A/B/C rotation never resets on Monday.
+- Full Body A/B/C starter templates remain immutable fallbacks and all three are customizable. Newly completed A/B/C sessions store the effective workout snapshot so later edits cannot rewrite history. Legacy strength stays distinct, affects cadence only, and never advances the A/B/C rotation.
 - Quick Add now means user-owned nutrition presets. Logging copies the preset's current values into an ordinary nutrition entry; later preset edits or deletion do not change history. One-off Add Meal remains separate.
 - Consumer calorie UI shows one rounded midpoint goal while effective-dated target history continues storing the calorie minimum and maximum.
 - Calories and protein use transparent, deterministic per-day correction entries for replacement edits; incomplete aggregates cannot be replaced. Steps, water, notes, and weight use field-level persistence, so there is no global Save Today action.
@@ -37,4 +37,4 @@
 
 ## Next task
 
-Review and apply `20260922155019_phase47_personalization.sql` before deploying Phase 4.7 application code, then merge only after the migration and preview are approved. Subscriptions, payments, AI coaching, photo logging, Apple Health, notifications, and native apps remain deferred.
+Review and apply `20260922200000_restore_full_body_c_template.sql` after the Phase 4.7 personalization migration and before deploying Phase 4.7.1 application code. Merge only after the migration and preview are approved. Subscriptions, payments, AI coaching, photo logging, Apple Health, notifications, and native apps remain deferred.

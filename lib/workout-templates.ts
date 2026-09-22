@@ -3,25 +3,25 @@ import type {Database,Json,Tables} from './database.types'
 
 type TypedSupabaseClient=SupabaseClient<Database>
 type WorkoutTemplateRow=Tables<'workout_templates'>
-export type BetaWorkoutCode='full_body_a'|'full_body_b'
+export type ProgramWorkoutCode='full_body_a'|'full_body_b'|'full_body_c'
 export type WorkoutExercise={name:string;sets:string;reps:string}
 export type WorkoutTemplate={
  id:string|null
  user_id:string|null
- workout_code:BetaWorkoutCode
+ workout_code:ProgramWorkoutCode
  name:string
  focus:string
  exercises:WorkoutExercise[]
 }
 export type WorkoutSnapshot={
  version:1
- workout_code:BetaWorkoutCode
+ workout_code:ProgramWorkoutCode
  name:string
  focus:string
  exercises:WorkoutExercise[]
 }
 
-const defaults:Record<BetaWorkoutCode,WorkoutTemplate>={
+const defaults:Record<ProgramWorkoutCode,WorkoutTemplate>={
  full_body_a:{id:null,user_id:null,workout_code:'full_body_a',name:'Full Body A',focus:'Squat + horizontal push/pull',exercises:[
   {name:'Goblet squat',sets:'3',reps:'8–12'},
   {name:'Dumbbell Romanian deadlift',sets:'3',reps:'8–12'},
@@ -39,6 +39,15 @@ const defaults:Record<BetaWorkoutCode,WorkoutTemplate>={
   {name:'Incline dumbbell press',sets:'2',reps:'10–12'},
   {name:'Dumbbell curls',sets:'2',reps:'10–15'},
   {name:'Dead bug',sets:'2',reps:'8–12/side'}
+ ]},
+ full_body_c:{id:null,user_id:null,workout_code:'full_body_c',name:'Full Body C',focus:'Athletic/metabolic full body',exercises:[
+  {name:'Dumbbell split squat',sets:'3',reps:'8–10/leg'},
+  {name:'Dumbbell hip thrust/glute bridge',sets:'3',reps:'10–15'},
+  {name:'Push-ups',sets:'3',reps:'8–15'},
+  {name:'Seated cable row or dumbbell row',sets:'3',reps:'10–12'},
+  {name:'Dumbbell shoulder press',sets:'2',reps:'8–12'},
+  {name:'Kettlebell swings',sets:'3',reps:'15–20'},
+  {name:'Farmer carry',sets:'3',reps:'30–45 sec'}
  ]}
 }
 
@@ -53,7 +62,9 @@ function normalizeExercise(value:unknown):WorkoutExercise{
 }
 
 export function validateWorkoutTemplate(input:Pick<WorkoutTemplate,'workout_code'|'name'|'focus'|'exercises'>){
- if(input.workout_code!=='full_body_a'&&input.workout_code!=='full_body_b')throw new Error('Only Full Body A and B can be customized.')
+ if(input.workout_code!=='full_body_a'&&input.workout_code!=='full_body_b'&&input.workout_code!=='full_body_c'){
+  throw new Error('Only Full Body A, B, and C can be customized.')
+ }
  const name=clean(input.name)
  const focus=clean(input.focus)
  if(!name)throw new Error('Workout name is required.')
@@ -63,14 +74,14 @@ export function validateWorkoutTemplate(input:Pick<WorkoutTemplate,'workout_code
  return {workout_code:input.workout_code,name,focus,exercises:input.exercises.map(normalizeExercise)}
 }
 
-export function defaultWorkoutTemplate(code:BetaWorkoutCode):WorkoutTemplate{
+export function defaultWorkoutTemplate(code:ProgramWorkoutCode):WorkoutTemplate{
  const template=defaults[code]
  return {...template,exercises:template.exercises.map(exercise=>({...exercise}))}
 }
 
 function normalizeRow(row:WorkoutTemplateRow):WorkoutTemplate{
  const validated=validateWorkoutTemplate({
-  workout_code:row.workout_code as BetaWorkoutCode,
+  workout_code:row.workout_code as ProgramWorkoutCode,
   name:row.name,focus:row.focus,exercises:Array.isArray(row.exercises)?row.exercises.map(normalizeExercise):[]
  })
  return {id:row.id,user_id:row.user_id,...validated}
@@ -81,7 +92,7 @@ export async function getWorkoutTemplates(client:TypedSupabaseClient,userId:stri
   .eq('user_id',userId).order('workout_code',{ascending:true})
  if(error)throw error
  const overrides=(data??[]).map(normalizeRow)
- return (['full_body_a','full_body_b'] as const).map(code=>
+ return (['full_body_a','full_body_b','full_body_c'] as const).map(code=>
   overrides.find(template=>template.workout_code===code)??defaultWorkoutTemplate(code)
  )
 }
@@ -99,7 +110,7 @@ export async function saveWorkoutTemplate(client:TypedSupabaseClient,userId:stri
  return normalizeRow(data)
 }
 
-export async function deleteWorkoutTemplate(client:TypedSupabaseClient,userId:string,code:BetaWorkoutCode){
+export async function deleteWorkoutTemplate(client:TypedSupabaseClient,userId:string,code:ProgramWorkoutCode){
  const {error}=await client.from('workout_templates').delete()
   .eq('user_id',userId).eq('workout_code',code)
  if(error)throw error
@@ -117,7 +128,7 @@ export function parseWorkoutSnapshot(value:Json|null):WorkoutSnapshot|null{
  if(record.version!==1)return null
  try{
   const validated=validateWorkoutTemplate({
-   workout_code:record.workout_code as BetaWorkoutCode,
+   workout_code:record.workout_code as ProgramWorkoutCode,
    name:String(record.name??''),focus:String(record.focus??''),
    exercises:Array.isArray(record.exercises)?record.exercises.map(normalizeExercise):[]
   })
@@ -126,7 +137,7 @@ export function parseWorkoutSnapshot(value:Json|null):WorkoutSnapshot|null{
 }
 
 export function resolveWorkoutTemplate(input:{
- code:BetaWorkoutCode
+ code:ProgramWorkoutCode
  completed:boolean
  snapshot:Json|null
  templates:WorkoutTemplate[]

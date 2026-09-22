@@ -27,7 +27,7 @@ export type WorkoutPlan={
  strengthOpportunity:boolean
 }
 
-const sequenceCodes:StructuredWorkoutCode[]=['full_body_a','full_body_b']
+const sequenceCodes:StructuredWorkoutCode[]=['full_body_a','full_body_b','full_body_c']
 const strengthCodes:WorkoutCode[]=['full_body_a','full_body_b','full_body_c','legacy_strength']
 
 function normalizeStructuredCode(value:string):StructuredWorkoutCode{
@@ -61,6 +61,7 @@ function normalizeSession(row:WorkoutSessionRow):WorkoutSession{
 
 export function nextStructuredWorkout(previous:WorkoutCode|null):StructuredWorkoutCode{
  if(previous==='full_body_a')return 'full_body_b'
+ if(previous==='full_body_b')return 'full_body_c'
  return 'full_body_a'
 }
 
@@ -109,7 +110,7 @@ export async function getWorkoutCoachingFacts(
   ?normalizeStructuredCode(sequenceResult.data.workout_code)
   :null
  return {
-  lastCompleted:lastCompleted==='full_body_a'||lastCompleted==='full_body_b'?lastCompleted:null,
+  lastCompleted,
   lastCompletedDate:latestStrengthResult.data?.scheduled_date??null,
   completedThisWeek:(weekResult.data??[]).length,
   strengthRecommended:strengthRecommendation({

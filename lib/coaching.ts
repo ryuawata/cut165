@@ -2,7 +2,7 @@ import type {ExerciseFrequency} from './profile.ts'
 import type {StructuredWorkoutCode} from './workouts.ts'
 import {calendarDateInTimezone,shiftCalendarDate} from './targets.ts'
 
-export type BetaWorkoutCode=Extract<StructuredWorkoutCode,'full_body_a'|'full_body_b'>
+export type ProgramWorkoutCode=StructuredWorkoutCode
 
 export function recommendedWeeklyWorkouts(frequency:ExerciseFrequency){
  if(frequency==='three_to_four')return 3
@@ -10,8 +10,10 @@ export function recommendedWeeklyWorkouts(frequency:ExerciseFrequency){
  return 2
 }
 
-export function nextBetaWorkout(lastCompleted:BetaWorkoutCode|null):BetaWorkoutCode{
- return lastCompleted==='full_body_a'?'full_body_b':'full_body_a'
+export function nextProgramWorkout(lastCompleted:ProgramWorkoutCode|null):ProgramWorkoutCode{
+ if(lastCompleted==='full_body_a')return 'full_body_b'
+ if(lastCompleted==='full_body_b')return 'full_body_c'
+ return 'full_body_a'
 }
 
 export function calendarWeekBounds(timezone:string,date=new Date()){
@@ -43,6 +45,8 @@ export function strengthRecommendation(input:{
  return calendarDayDistance(input.lastCompletedDate,input.logDate)>=minimumCalendarGap
 }
 
-export function workoutName(code:BetaWorkoutCode){
- return code==='full_body_a'?'Full Body A':'Full Body B'
+export function workoutName(code:ProgramWorkoutCode){
+ if(code==='full_body_a')return 'Full Body A'
+ if(code==='full_body_b')return 'Full Body B'
+ return 'Full Body C'
 }

@@ -12,7 +12,7 @@ import {
 } from '../lib/nutrition-presets.ts'
 import {caloriePace,primaryCalorieTarget} from '../lib/targets.ts'
 import {
- defaultWorkoutTemplate,getWorkoutTemplates,resolveWorkoutTemplate,snapshotWorkout,validateWorkoutTemplate
+ defaultWorkoutTemplate,deleteWorkoutTemplate,getWorkoutTemplates,resolveWorkoutTemplate,saveWorkoutTemplate,snapshotWorkout,validateWorkoutTemplate
 } from '../lib/workout-templates.ts'
 import {setWorkoutCompletion} from '../lib/workouts.ts'
 
@@ -33,6 +33,16 @@ test('workout templates fall back to starters and preserve completed snapshots',
  const edited={...override,name:'Later edit'}
  assert.equal(resolveWorkoutTemplate({code:'full_body_a',completed:true,snapshot,templates:[edited]}).name,'My A')
  assert.throws(()=>validateWorkoutTemplate({...starter,exercises:[]}),/between 1 and 20/)
+
+ const cStarter=defaultWorkoutTemplate('full_body_c')
+ assert.equal(cStarter.name,'Full Body C')
+ assert.equal(cStarter.focus,'Athletic/metabolic full body')
+ assert.equal(cStarter.exercises.length,7)
+ const cOverride={...cStarter,id:'c-override',user_id:'user-1',name:'My C'}
+ assert.equal(resolveWorkoutTemplate({code:'full_body_c',completed:false,snapshot:null,templates:[cOverride]}).name,'My C')
+ const cSnapshot=snapshotWorkout(cOverride)
+ assert.equal(resolveWorkoutTemplate({code:'full_body_c',completed:true,snapshot:cSnapshot,templates:[{...cOverride,name:'Later C'}]}).name,'My C')
+ assert.equal(resolveWorkoutTemplate({code:'full_body_c',completed:true,snapshot:null,templates:[cOverride]}).name,'Full Body C')
 })
 
 test('workout template reads are explicitly user scoped',async()=>{
@@ -47,19 +57,47 @@ test('workout template reads are explicitly user scoped',async()=>{
  }
  const client={from(table:string){assert.equal(table,'workout_templates');return new Query()}} as unknown as Parameters<typeof getWorkoutTemplates>[0]
  const templates=await getWorkoutTemplates(client,'user-1')
- assert.equal(templates.length,2)
+ assert.equal(templates.length,3)
  assert.deepEqual(filters,[['user_id','user-1']])
 })
 
-test('completing a modern workout writes the effective template snapshot',async()=>{
+test('Full Body C can be saved and reset through workout templates',async()=>{
+ let saved:Record<string,unknown>|null=null
+ let deletedCode:unknown=null
+ const c={...defaultWorkoutTemplate('full_body_c'),name:'Custom C'}
+ const row={...c,id:'template-c',user_id:'user-1',created_at:'now',updated_at:'now'}
+ class Query implements PromiseLike<{error:null}>{
+  select(){return this}
+  eq(column:string,value:unknown){if(column==='workout_code')deletedCode=value;return this}
+  async single(){return {data:row,error:null}}
+  then<TResult1={error:null},TResult2=never>(onfulfilled?:((value:{error:null})=>TResult1|PromiseLike<TResult1>)|null):PromiseLike<TResult1|TResult2>{
+   return Promise.resolve({error:null}).then(onfulfilled)
+  }
+ }
+ const client={from(table:string){
+  assert.equal(table,'workout_templates')
+  return {
+   upsert(values:Record<string,unknown>){saved=values;return new Query()},
+   delete(){return new Query()}
+  }
+ }} as unknown as Parameters<typeof saveWorkoutTemplate>[0]
+ const result=await saveWorkoutTemplate(client,'user-1',c)
+ const reset=await deleteWorkoutTemplate(client,'user-1','full_body_c')
+ assert.equal(saved?.workout_code,'full_body_c')
+ assert.equal(result.name,'Custom C')
+ assert.equal(deletedCode,'full_body_c')
+ assert.equal(reset.name,'Full Body C')
+})
+
+test('completing Full Body C writes the effective template snapshot',async()=>{
  let inserted:Record<string,unknown>|null=null
- const template=defaultWorkoutTemplate('full_body_a')
+ const template=defaultWorkoutTemplate('full_body_c')
  const snapshot=snapshotWorkout(template)
  const row=()=>({
   id:'session-1',created_at:'2026-09-22T00:00:00Z',updated_at:'2026-09-22T00:00:00Z',
   completed_at:'2026-09-22T00:00:00Z',duration_minutes:null,notes:null,scheduled_date:'2026-09-22',
-  source:'manual',source_ref:'cut365:2026-09-22:full_body_a',status:'completed',user_id:'user-1',
-  workout_code:'full_body_a',workout_snapshot:snapshot
+  source:'manual',source_ref:'cut365:2026-09-22:full_body_c',status:'completed',user_id:'user-1',
+  workout_code:'full_body_c',workout_snapshot:snapshot
  })
  const read={eq(){return this},async maybeSingle(){return {data:null,error:null}}}
  const write={select(){return this},async single(){return {data:row(),error:null}}}
@@ -68,10 +106,16 @@ test('completing a modern workout writes the effective template snapshot',async(
   return {select(){return read},insert(values:Record<string,unknown>){inserted=values;return write}}
  }} as unknown as Parameters<typeof setWorkoutCompletion>[0]
  await setWorkoutCompletion(client,{
-  userId:'user-1',logDate:'2026-09-22',code:'full_body_a',completed:true,
+  userId:'user-1',logDate:'2026-09-22',code:'full_body_c',completed:true,
   session:null,isToday:true,workoutSnapshot:snapshot
  })
  assert.deepEqual(inserted?.workout_snapshot,snapshot)
+})
+
+test('Phase 4.7.1 constraint allows A/B/C template codes only',()=>{
+ const sql=readFileSync(new URL('../supabase/migrations/20260922200000_restore_full_body_c_template.sql',import.meta.url),'utf8')
+ assert.match(sql,/workout_code in \('full_body_a', 'full_body_b', 'full_body_c'\)/)
+ assert.doesNotMatch(sql,/legacy_strength|recovery|custom/)
 })
 
 test('nutrition presets accept multiple macros and optional alcohol',()=>{

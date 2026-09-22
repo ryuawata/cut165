@@ -30,7 +30,7 @@ import {getActiveGoal,getCurrentGoalTarget,getEffectiveGoalTarget,type Goal,type
 import {calendarDateInTimezone,caloriePace,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms,primaryCalorieTarget} from '../lib/targets'
 import {decideAccountBootstrap,decideCompatibilityTimezone} from '../lib/account-bootstrap'
 import {
- calendarWeekBounds,nextBetaWorkout,recommendedWeeklyWorkouts,workoutName
+ calendarWeekBounds,nextProgramWorkout,recommendedWeeklyWorkouts,workoutName
 } from '../lib/coaching'
 import {
  defaultWorkoutTemplate,getWorkoutTemplates,resolveWorkoutTemplate,snapshotWorkout,
@@ -57,12 +57,6 @@ const shiftDate=(iso:string,days:number)=>{
 }
 const blankMeal=():MealDraft=>({description:'',mealSlot:'',calories:'',protein_g:'',carbs_g:''})
 
-const historicalWorkoutC={name:'Full Body C',focus:'Athletic/metabolic full body',exercises:[
-  ['Dumbbell split squat','3','8–10/leg'],['Dumbbell hip thrust/glute bridge','3','10–15'],
-  ['Push-ups','3','8–15'],['Seated cable row or dumbbell row','3','10–12'],
-  ['Dumbbell shoulder press','2','8–12'],['Kettlebell swings','3','15–20'],['Farmer carry','3','30–45 sec']
- ] as const}
-
 function emptyWorkoutPlan(_logDate:string):WorkoutPlan{
  return {code:'full_body_a',completed:false,session:null,strengthOpportunity:true}
 }
@@ -72,7 +66,6 @@ function getTraining(iso:string,plan:WorkoutPlan,templates:WorkoutTemplate[]){
  const dayLabel=date.toLocaleDateString(undefined,{weekday:'short'}).toUpperCase()
  if(plan.code==='recovery')return {name:'Recovery + Movement',type:'Recovery',dayLabel,duration:'At your pace',kind:'recovery' as const}
  if(plan.code==='legacy_strength')return {name:'Legacy Strength Workout',type:'Historical strength',dayLabel,duration:'Logged workout',kind:'legacy' as const}
- if(plan.code==='full_body_c')return {...historicalWorkoutC,type:'Historical strength',dayLabel,duration:'25–35 min',kind:'strength' as const}
  const template=resolveWorkoutTemplate({
   code:plan.code,completed:plan.completed,snapshot:plan.session?.workout_snapshot??null,templates
  })
@@ -126,13 +119,13 @@ export default function Page(){
  const [weightHistory,setWeightHistory]=useState<WeightHistory[]>([])
  const [workoutPlan,setWorkoutPlan]=useState<WorkoutPlan>(()=>emptyWorkoutPlan(localISO()))
  const [workoutFacts,setWorkoutFacts]=useState<{
-  lastCompleted:'full_body_a'|'full_body_b'|null
+  lastCompleted:'full_body_a'|'full_body_b'|'full_body_c'|null
   lastCompletedDate:string|null
   completedThisWeek:number
   strengthRecommended:boolean
  }|null>(null)
  const [workoutTemplates,setWorkoutTemplates]=useState<WorkoutTemplate[]>(()=>[
-  defaultWorkoutTemplate('full_body_a'),defaultWorkoutTemplate('full_body_b')
+  defaultWorkoutTemplate('full_body_a'),defaultWorkoutTemplate('full_body_b'),defaultWorkoutTemplate('full_body_c')
  ])
  const [workoutBusy,setWorkoutBusy]=useState(false)
  const [entries,setEntries]=useState<NutritionEntry[]>([])
@@ -419,7 +412,7 @@ export default function Page(){
   if(pace!=='over')return ['Close','warn']
   return ['Over target','bad']
  },[totals,targetForDay])
- const nextWorkout=workoutFacts?nextBetaWorkout(workoutFacts.lastCompleted):'full_body_a'
+ const nextWorkout=workoutFacts?nextProgramWorkout(workoutFacts.lastCompleted):'full_body_a'
  const strengthSuppressed=isToday&&!workoutPlan.completed&&(!workoutFacts||!workoutFacts.strengthRecommended)
 
  const metricNumber=(key:'steps'|'water_oz',value:string)=>{
@@ -485,7 +478,7 @@ export default function Page(){
   if(!session||workoutBusy)return
   const logDate=selectedDate
   const plan=workoutPlan
-  const template=plan.code==='full_body_a'||plan.code==='full_body_b'
+  const template=plan.code==='full_body_a'||plan.code==='full_body_b'||plan.code==='full_body_c'
    ?resolveWorkoutTemplate({code:plan.code,completed:plan.completed,snapshot:plan.session?.workout_snapshot??null,templates:workoutTemplates})
    :null
   setWorkoutBusy(true)

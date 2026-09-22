@@ -3,7 +3,7 @@ import {FormEvent,useEffect,useState} from 'react'
 import {supabase} from '../lib/supabase'
 import {
  defaultWorkoutTemplate,deleteWorkoutTemplate,saveWorkoutTemplate,
- type BetaWorkoutCode,type WorkoutExercise,type WorkoutTemplate
+ type ProgramWorkoutCode,type WorkoutExercise,type WorkoutTemplate
 } from '../lib/workout-templates'
 
 const clone=(template:WorkoutTemplate):WorkoutTemplate=>({...template,exercises:template.exercises.map(exercise=>({...exercise}))})
@@ -15,7 +15,7 @@ export default function WorkoutTemplateEditor({userId,templates,onChange}:{
  onChange:(templates:WorkoutTemplate[])=>void
 }){
  const [open,setOpen]=useState(false)
- const [code,setCode]=useState<BetaWorkoutCode>('full_body_a')
+ const [code,setCode]=useState<ProgramWorkoutCode>('full_body_a')
  const active=templates.find(template=>template.workout_code===code)??defaultWorkoutTemplate(code)
  const [draft,setDraft]=useState(()=>clone(active))
  const [busy,setBusy]=useState(false)
@@ -57,11 +57,12 @@ export default function WorkoutTemplateEditor({userId,templates,onChange}:{
  }
 
  return <div className="templateEditor">
-  <button type="button" className="textAction" onClick={()=>setOpen(value=>!value)}>{open?'Close workout editor':'Edit A / B workouts'}</button>
+  <button type="button" className="textAction" onClick={()=>setOpen(value=>!value)}>{open?'Close workout editor':'Edit workouts'}</button>
   {open&&<form onSubmit={save} className="templateForm">
    <div className="templateTabs">
     <button type="button" className={code==='full_body_a'?'active':''} onClick={()=>setCode('full_body_a')}>Full Body A</button>
     <button type="button" className={code==='full_body_b'?'active':''} onClick={()=>setCode('full_body_b')}>Full Body B</button>
+    <button type="button" className={code==='full_body_c'?'active':''} onClick={()=>setCode('full_body_c')}>Full Body C</button>
    </div>
    <label>Name<input value={draft.name} onChange={event=>setDraft({...draft,name:event.target.value})} required/></label>
    <label>Focus <small>optional</small><input value={draft.focus} onChange={event=>setDraft({...draft,focus:event.target.value})}/></label>
