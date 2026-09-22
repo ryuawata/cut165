@@ -90,7 +90,7 @@ export default function GoalSettings({session,profile,goal,target,currentWeightL
   setProfileError('')
   setProfileNotice('')
   try{
-   if(!sex)throw new Error('Choose the option used for energy estimation.')
+   if(!sex)throw new Error('Choose a gender.')
    const nextProfile=await saveProfile(supabase,session.user.id,{
     displayName:profile.display_name,
     birthYear:Number(birthYear),
@@ -120,12 +120,12 @@ export default function GoalSettings({session,profile,goal,target,currentWeightL
    {section==='profile'?<form onSubmit={saveProfileDetails}>
     <p className="settingsIntro">These details improve your target estimate. Saving them does not change your current plan.</p>
     <label>Birth year<input type="number" min="1900" max={new Date().getFullYear()-18} value={birthYear} onChange={event=>setBirthYear(event.target.value)} required/></label>
-    <label>Energy estimate<select value={sex} onChange={event=>setSex(event.target.value as ''|EnergyEstimationSex)} required><option value="">Choose</option><option value="female">Female</option><option value="male">Male</option></select></label>
+    <label>Gender<select value={sex} onChange={event=>setSex(event.target.value as ''|EnergyEstimationSex)} required><option value="">Choose</option><option value="female">Female</option><option value="male">Male</option></select></label>
     <label>Height <small>inches</small><input type="number" min="48" max="96" step=".1" value={height} onChange={event=>setHeight(event.target.value)} required/></label>
     <label>Timezone<input value={timezone} onChange={event=>setTimezone(event.target.value)} required/></label>
     <label>Weight unit<select value={weightUnit} onChange={event=>setWeightUnit(event.target.value as WeightUnit)}><option value="lb">Pounds</option><option value="kg">Kilograms</option></select></label>
     <label>Usual activity<select value={activityLevel} onChange={event=>setActivityLevel(event.target.value as ActivityLevel)}><option value="sedentary">Mostly seated</option><option value="light">Lightly active</option><option value="moderate">Moderately active</option><option value="very_active">Very active</option></select></label>
-    <label>Exercise frequency <small>{recommendedWeeklyWorkouts(exerciseFrequency)} workouts/week</small><select value={exerciseFrequency} onChange={event=>setExerciseFrequency(event.target.value as Profile['exercise_frequency'])}><option value="none">None</option><option value="one_to_two">1–2 days/week</option><option value="three_to_four">3–4 days/week</option><option value="five_plus">5+ days/week</option></select></label>
+    <label>Strength training frequency <small>{recommendedWeeklyWorkouts(exerciseFrequency)} workouts/week</small><select value={exerciseFrequency} onChange={event=>setExerciseFrequency(event.target.value as Profile['exercise_frequency'])}><option value="none">None</option><option value="one_to_two">1–2 days/week</option><option value="three_to_four">3–4 days/week</option><option value="five_plus">5+ days/week</option></select></label>
     {profileError&&<p className="formError" role="alert">{profileError}</p>}
     <button className="primaryAction" disabled={profileBusy}>{profileBusy?'Saving…':'Save profile'} <b>→</b></button>
    </form>:<form onSubmit={save}>

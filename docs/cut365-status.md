@@ -8,7 +8,8 @@
 - The Phase 3 reconciliation migration has been applied and verified in production.
 - Phase 4 profiles, goals, onboarding, and dynamic targets: live.
 - Phase 4.5 new-user onboarding hardening: live.
-- Current phase: Phase 4.6 beta coaching and domain cutover on the `cut365-phase-4-6` feature branch.
+- Phase 4.6 beta coaching and domain cutover: complete on `main`.
+- Current phase: Phase 4.7 beta UX and personalization on the `cut365-phase-4-7` feature branch. Its additive migration is intentionally unapplied pending review.
 
 ## Decisions
 
@@ -24,13 +25,16 @@
 - Profile Settings completes legacy calculation fields without changing goal history or recalculating targets; goal editing unlocks immediately after the profile save.
 - An incomplete legacy compatibility profile may replace the schema-default `UTC` placeholder with the browser-detected IANA timezone once; completed or customized profiles and historical `log_date` values remain unchanged.
 - Phase 4.5 adds a constrained exercise-frequency profile value and a persistent first-day prompt dismissal. Exercise frequency does not influence calorie estimates. New-user plans expose an editable step and water target, and unsafe requested dates are constrained to the fastest allowed pace.
-- Phase 4.6 derives a weekly training recommendation from exercise frequency: `none` and `one_to_two` map to 2 workouts, `three_to_four` maps to 3, and `five_plus` maps to 4. This is a training target only and remains excluded from calorie calculations.
-- Beta training alternates Full Body A and B from the user's most recent completed session. Planned, open, or skipped sessions do not advance the sequence. Weekly completion uses Monday–Sunday boundaries in the profile timezone.
-- Dashboard coaching is deterministic and derived from current profile, effective targets, daily facts, and workout history. It is never persisted as generated text, and incomplete protein totals never produce falsely precise remaining-protein guidance.
+- Phase 4.7 caps the full-body recommendation at 2 weekly sessions for `none` and `one_to_two`, and 3 for `three_to_four` and `five_plus`. Two-session plans require two full rest calendar days; three-session plans require one. Weekly completion and recovery spacing derive from completed A/B sessions in the profile timezone. Next-workout sequence and today's eligibility are separate facts.
+- Full Body A/B starter templates remain immutable fallbacks. Users may persist owned overrides, while newly completed sessions store the effective workout snapshot so later edits cannot rewrite history. Legacy strength stays distinct and never advances A/B rotation.
+- Quick Add now means user-owned nutrition presets. Logging copies the preset's current values into an ordinary nutrition entry; later preset edits or deletion do not change history. One-off Add Meal remains separate.
+- Consumer calorie UI shows one rounded midpoint goal while effective-dated target history continues storing the calorie minimum and maximum.
+- Calories and protein use transparent, deterministic per-day correction entries for replacement edits; incomplete aggregates cannot be replaced. Steps, water, notes, and weight use field-level persistence, so there is no global Save Today action.
+- The Drinks, Optional Cardio, and Today's Guidance dashboard experiences are removed. Their historical database fields and records remain intact.
 - The canonical public product identity is CUT365 at `https://cut365.app`. Dynamic goal identities such as CUT165 remain intentional and distinct from the master brand.
 - Phase 4 deployment requires a server-only `SUPABASE_SECRET_KEY`; it must never be exposed as a `NEXT_PUBLIC_` variable.
 - Keep AI and photo logging out of this phase.
 
 ## Next task
 
-Before merging Phase 4.6, verify the Vercel production domain configuration treats `https://cut365.app` as primary and redirects `https://www.cut365.app` to it. In Supabase Auth, verify the Site URL is `https://cut365.app` and the production CUT365 origin is present in the allowed redirect URLs. No Phase 4.6 database migration is required. Subscriptions, payments, AI coaching, photo logging, Apple Health, and native apps remain deferred.
+Review and apply `20260922155019_phase47_personalization.sql` before deploying Phase 4.7 application code, then merge only after the migration and preview are approved. Subscriptions, payments, AI coaching, photo logging, Apple Health, notifications, and native apps remain deferred.

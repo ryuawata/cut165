@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
- calendarWeekBounds,nextBetaWorkout,proteinGuidance,recommendedWeeklyWorkouts,
- stepsGuidance,weeklyTrainingGuidance
+ calendarWeekBounds,nextBetaWorkout,recommendedWeeklyWorkouts,strengthRecommendation
 } from '../lib/coaching.ts'
 import {
  getWorkoutCoachingFacts,getWorkoutPlan,nextStructuredWorkout,setWorkoutCompletion
@@ -13,7 +12,16 @@ test('exercise frequency maps to a weekly training recommendation',()=>{
  assert.equal(recommendedWeeklyWorkouts('none'),2)
  assert.equal(recommendedWeeklyWorkouts('one_to_two'),2)
  assert.equal(recommendedWeeklyWorkouts('three_to_four'),3)
- assert.equal(recommendedWeeklyWorkouts('five_plus'),4)
+ assert.equal(recommendedWeeklyWorkouts('five_plus'),3)
+})
+
+test('strength cadence separates the next workout from a recommendation for today',()=>{
+ assert.equal(strengthRecommendation({logDate:'2026-09-22',weeklyTarget:2,completedThisWeek:1,lastCompletedDate:'2026-09-21'}),false)
+ assert.equal(strengthRecommendation({logDate:'2026-09-23',weeklyTarget:2,completedThisWeek:1,lastCompletedDate:'2026-09-21'}),false)
+ assert.equal(strengthRecommendation({logDate:'2026-09-24',weeklyTarget:2,completedThisWeek:1,lastCompletedDate:'2026-09-21'}),true)
+ assert.equal(strengthRecommendation({logDate:'2026-09-22',weeklyTarget:3,completedThisWeek:1,lastCompletedDate:'2026-09-21'}),false)
+ assert.equal(strengthRecommendation({logDate:'2026-09-23',weeklyTarget:3,completedThisWeek:1,lastCompletedDate:'2026-09-21'}),true)
+ assert.equal(strengthRecommendation({logDate:'2026-09-24',weeklyTarget:3,completedThisWeek:3,lastCompletedDate:'2026-09-21'}),false)
 })
 
 test('completed A/B history determines the next workout',()=>{
@@ -24,6 +32,7 @@ test('completed A/B history determines the next workout',()=>{
 
 test('legacy strength history remains distinct and does not advance the A/B rotation',()=>{
  assert.equal(nextStructuredWorkout('legacy_strength'),'full_body_a')
+ assert.equal(nextStructuredWorkout('recovery'),'full_body_a')
 })
 
 test('getWorkoutPlan reads a historical legacy strength session safely',async()=>{
@@ -62,7 +71,7 @@ test('normal workout creation rejects the historical legacy code',async()=>{
  const client={from(){throw new Error('Database should not be called')}} as unknown as Parameters<typeof setWorkoutCompletion>[0]
  await assert.rejects(setWorkoutCompletion(client,{
   userId:'user-123',logDate:'2026-09-21',code:'legacy_strength',completed:true,
-  session:null,isToday:true
+  session:null,isToday:true,workoutSnapshot:null
  }),/read-only/)
 })
 
@@ -76,23 +85,7 @@ test('calendar weeks use local Monday through Sunday boundaries',()=>{
  })
 })
 
-test('daily step and protein guidance respects reached and incomplete states',()=>{
- assert.equal(stepsGuidance(4200,5000),"800 steps to reach today's target")
- assert.equal(stepsGuidance(5400,5000),'Step target reached')
- assert.equal(proteinGuidance({
-  knownProteinG:110,proteinTargetG:145,unknownProteinEntryCount:0
- }),'35g protein remaining')
- assert.equal(proteinGuidance({
-  knownProteinG:110,proteinTargetG:145,unknownProteinEntryCount:1
- }),'Protein total is incomplete today')
-})
-
-test('weekly completion uses neutral target language',()=>{
- assert.equal(weeklyTrainingGuidance(1,2),'1 of 2 workouts this week')
- assert.equal(weeklyTrainingGuidance(2,2),'Weekly training target complete')
-})
-
-test('workout coaching counts the current week and excludes incomplete sessions',async()=>{
+test('workout coaching counts only completed A/B sessions, excluding planned, skipped, recovery, and legacy history',async()=>{
  const filters:Array<[string,string,unknown]>=[]
  type QueryResult={data:Array<{id:string}>;error:null}
  class QueryMock implements PromiseLike<QueryResult>{
@@ -118,8 +111,8 @@ test('workout coaching counts the current week and excludes incomplete sessions'
    return new QueryMock()
   }
  } as unknown as Parameters<typeof getWorkoutCoachingFacts>[0]
- const facts=await getWorkoutCoachingFacts(client,'user-123','2026-09-14','2026-09-21','2026-09-20')
- assert.deepEqual(facts,{lastCompleted:'full_body_a',completedThisWeek:1})
+ const facts=await getWorkoutCoachingFacts(client,'user-123','2026-09-14','2026-09-21','2026-09-20',2)
+ assert.deepEqual(facts,{lastCompleted:'full_body_a',lastCompletedDate:null,completedThisWeek:1,strengthRecommended:true})
  assert.equal(filters.filter(([,column,value])=>column==='user_id'&&value==='user-123').length,2)
  assert.equal(filters.filter(([,column,value])=>column==='status'&&value==='completed').length,2)
  assert.deepEqual(

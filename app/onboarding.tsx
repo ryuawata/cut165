@@ -65,7 +65,7 @@ export default function Onboarding({session,onComplete}:{session:Session;onCompl
   setError('')
   try{
    if(step===1){
-    if(!sex)throw new Error('Choose the option used for energy estimation.')
+    if(!sex)throw new Error('Choose a gender.')
     const currentYear=new Date().getFullYear()
     if(!Number.isInteger(parsed.birthYear)||parsed.birthYear<1900||parsed.birthYear>currentYear-18)throw new Error('Enter a valid adult birth year.')
     if(!Number.isFinite(parsed.heightInches)||parsed.heightInches<48||parsed.heightInches>96)throw new Error('Height must be between 48 and 96 inches.')
@@ -143,11 +143,11 @@ export default function Onboarding({session,onComplete}:{session:Session;onCompl
   <section className="onboardingCard">
    <p className="eyebrow">PERSONAL SETUP</p>
    {step===1&&<form onSubmit={next}>
-    <h1>About you</h1><p>Just enough context to estimate a practical starting range.</p>
+    <h1>About you</h1><p>Just enough context to estimate a practical starting plan.</p>
     <div className="formGrid">
      <label className="wide">Name <small>optional</small><input value={displayName} onChange={event=>setDisplayName(event.target.value)} placeholder="First name"/></label>
      <label>Birth year<input type="number" min="1900" max={new Date().getFullYear()-18} value={birthYear} onChange={event=>setBirthYear(event.target.value)} required/></label>
-     <label>Energy estimate<select value={sex} onChange={event=>setSex(event.target.value as ''|EnergyEstimationSex)} required><option value="">Choose</option><option value="female">Female</option><option value="male">Male</option></select></label>
+     <label>Gender<select value={sex} onChange={event=>setSex(event.target.value as ''|EnergyEstimationSex)} required><option value="">Choose</option><option value="female">Female</option><option value="male">Male</option></select></label>
      <label>Height <small>inches</small><input type="number" min="48" max="96" step=".1" value={height} onChange={event=>setHeight(event.target.value)} required/></label>
      <label>Weight unit<select value={weightUnit} onChange={event=>setWeightUnit(event.target.value as WeightUnit)}><option value="lb">Pounds</option><option value="kg">Kilograms</option></select></label>
      <label>Current weight <small>{unitLabel}</small><input type="number" min="1" step=".1" value={currentWeight} onChange={event=>setCurrentWeight(event.target.value)} required/></label>
@@ -158,7 +158,6 @@ export default function Onboarding({session,onComplete}:{session:Session;onCompl
    {step===2&&<form onSubmit={next}>
     <h1>Your goal</h1><p>This can change later without erasing your history.</p>
     <div className="formGrid">
-     <label>Current weight <small>{unitLabel}</small><input type="number" min="1" step=".1" value={currentWeight} onChange={event=>setCurrentWeight(event.target.value)} required/></label>
      <label>Goal type<select value={goalChoice} onChange={event=>setGoalChoice(event.target.value as GoalChoice)}><option value="cut">Cut</option><option value="maintain">Maintain</option><option value="build">Build</option></select></label>
      {goalType!=='maintain'&&<><label>Target weight <small>{unitLabel}</small><input type="number" min="1" step=".1" value={targetWeight} onChange={event=>setTargetWeight(event.target.value)} required/></label>
      <label>Target date <small>optional</small><input type="date" value={targetDate} onChange={event=>setTargetDate(event.target.value)}/></label></>}
@@ -170,12 +169,12 @@ export default function Onboarding({session,onComplete}:{session:Session;onCompl
     <h1>Lifestyle</h1><p>Choose an honest baseline. You can adjust these starting targets.</p>
     <div className="formGrid">
      <label className="wide">Usual activity<select value={activityLevel} onChange={event=>{const level=event.target.value as ActivityLevel;setActivityLevel(level);if(!stepsCustomized)setStepsTarget(String(recommendedSteps(level)))}}><option value="sedentary">Mostly seated</option><option value="light">Lightly active</option><option value="moderate">Moderately active</option><option value="very_active">Very active</option></select></label>
-     <label className="wide">Exercise frequency<select value={exerciseFrequency} onChange={event=>setExerciseFrequency(event.target.value as ExerciseFrequency)}><option value="none">None</option><option value="one_to_two">1–2 days/week</option><option value="three_to_four">3–4 days/week</option><option value="five_plus">5+ days/week</option></select></label>
+     <label className="wide">Strength training frequency<select value={exerciseFrequency} onChange={event=>setExerciseFrequency(event.target.value as ExerciseFrequency)}><option value="none">None</option><option value="one_to_two">1–2 days/week</option><option value="three_to_four">3–4 days/week</option><option value="five_plus">5+ days/week</option></select></label>
      <label>Daily step target <small>Recommended {recommendedSteps(activityLevel).toLocaleString()}</small><input type="number" min="1000" max="100000" step="1" value={stepsTarget} onChange={event=>{setStepsTarget(event.target.value);setStepsCustomized(true)}} required/></label>
      <label>Daily water target <small>oz · recommended {currentWeight?recommendedWaterOz(parsed.currentWeightLbs):'—'}</small><input type="number" min="1" max="500" step="1" placeholder={currentWeight?String(recommendedWaterOz(parsed.currentWeightLbs)):''} value={waterTarget} onChange={event=>setWaterTarget(event.target.value)}/></label>
     </div>
     {preview?.pace.paceWarning&&<p className="paceWarning" role="status">Your requested date is faster than recommended. This plan uses {preview.pace.targetDate}, the fastest date within the safe pace.</p>}
-    {preview&&<div className="onboardingPreview"><p className="eyebrow">YOUR STARTING PLAN</p><strong>{preview.targets.primaryCalorieTarget.toLocaleString()} <small>kcal/day</small></strong><p>Range {preview.targets.calorieTargetMin.toLocaleString()}–{preview.targets.calorieTargetMax.toLocaleString()} kcal · {preview.targets.proteinTargetG}g protein</p><p>{preview.targets.stepsTarget.toLocaleString()} steps · {preview.targets.waterTargetOz} oz water</p><p>Estimated maintenance: {preview.targets.maintenanceCalories.toLocaleString()} kcal/day</p><details><summary>How we calculated this</summary><p>Maintenance is estimated from your age, height, weight, and activity. Calorie and protein targets are adjusted for your goal. Exercise frequency is saved for future training guidance, not included in this calorie estimate.</p></details></div>}
+    {preview&&<div className="onboardingPreview"><p className="eyebrow">YOUR STARTING PLAN</p><strong>{preview.targets.primaryCalorieTarget.toLocaleString()} <small>kcal/day</small></strong><p>{preview.targets.proteinTargetG}g protein · {preview.targets.stepsTarget.toLocaleString()} steps · {preview.targets.waterTargetOz} oz water</p><p>Estimated maintenance: {preview.targets.maintenanceCalories.toLocaleString()} kcal/day</p><details><summary>How we calculated this</summary><p>Maintenance is estimated from your age, height, weight, and activity. Calorie and protein targets are adjusted for your goal. Strength training frequency guides workout recommendations and is not included in this calorie estimate.</p></details></div>}
     <p className="onboardingDisclaimer">CUT365 offers fitness-coach-style guidance based on what you enter. It is not medical advice or a replacement for a qualified healthcare professional.</p>
     <div className="formActions"><button type="button" className="quietAction" onClick={()=>setStep(2)} disabled={busy}>Back</button><button className="primaryAction" disabled={busy}>{busy?'Building your plan…':'Start CUT365'} <b>→</b></button></div>
    </form>}

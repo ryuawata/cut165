@@ -3,10 +3,12 @@ import {FormEvent,useEffect,useMemo,useRef,useState} from 'react'
 import type {Session} from '@supabase/supabase-js'
 import Onboarding,{type AccountSetup} from './onboarding'
 import GoalSettings from './goal-settings'
+import NutritionPresets from './nutrition-presets'
+import WorkoutTemplateEditor from './workout-template-editor'
 import {supabase} from '../lib/supabase'
 import {
- emptyDailyMetrics,getDailyMetrics,incrementDailyMetric,saveDailyMetrics,
- type DailyMetricDeltaKey,type DailyMetrics
+ emptyDailyMetrics,getDailyMetrics,saveDailyMetricField,
+ type AutosaveDailyMetricKey,type DailyMetrics
 } from '../lib/daily-metrics'
 import {
  getBodyMeasurement,getRecentWeights,saveBodyWeight,
@@ -14,25 +16,27 @@ import {
 } from '../lib/body-measurements'
 import {
  getWorkoutCoachingFacts,getWorkoutPlan,setWorkoutCompletion,
- type StructuredWorkoutCode,type WorkoutPlan
+ type WorkoutPlan
 } from '../lib/workouts'
 import {
  createNutritionEntry,deleteNutritionEntry,emptyDailyNutritionTotals,
- getDailyNutritionTotals,getNutritionEntries,updateNutritionEntry,
- type DailyNutritionTotals,type MealSlot,type NutritionEntry
+ getDailyNutritionTotals,getNutritionEntries,replaceNutritionTotal,updateNutritionEntry,
+ type CorrectableNutritionMetric,type DailyNutritionTotals,type MealSlot,type NutritionEntry
 } from '../lib/nutrition'
 import {
  completeProfileOnboarding,dismissGettingStarted,getProfile,hasCompleteCalculationProfile,saveCompatibilityTimezone,type Profile
 } from '../lib/profile'
 import {getActiveGoal,getCurrentGoalTarget,getEffectiveGoalTarget,type Goal,type GoalTarget} from '../lib/goals'
-import {calendarDateInTimezone,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms} from '../lib/targets'
+import {calendarDateInTimezone,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms,primaryCalorieTarget} from '../lib/targets'
 import {decideAccountBootstrap,decideCompatibilityTimezone} from '../lib/account-bootstrap'
 import {
- calendarWeekBounds,nextBetaWorkout,proteinGuidance,recommendedWeeklyWorkouts,
- stepsGuidance,weeklyTrainingGuidance,workoutName
+ calendarWeekBounds,nextBetaWorkout,recommendedWeeklyWorkouts,workoutName
 } from '../lib/coaching'
+import {
+ defaultWorkoutTemplate,getWorkoutTemplates,resolveWorkoutTemplate,snapshotWorkout,
+ type WorkoutTemplate
+} from '../lib/workout-templates'
 
-type MetricKey='calories'|'protein_g'|'carbs_g'|DailyMetricDeltaKey
 type MealDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string}
 type EditDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string}
 
@@ -53,39 +57,28 @@ const shiftDate=(iso:string,days:number)=>{
 }
 const blankMeal=():MealDraft=>({description:'',mealSlot:'',calories:'',protein_g:'',carbs_g:''})
 
-const workouts:Record<StructuredWorkoutCode,{name:string;focus:string;exercises:readonly (readonly [string,string,string])[]}>= {
- full_body_a:{name:'Full Body A',focus:'Squat + horizontal push/pull',exercises:[
-  ['Goblet squat','3','8–12'],['Dumbbell Romanian deadlift','3','8–12'],
-  ['Dumbbell bench/floor press','3','8–12'],['One-arm dumbbell row','3','10–12/side'],
-  ['Dumbbell lateral raise','2','12–15'],['Kettlebell swings','3','15'],['Plank','2','30–60 sec']
- ]},
- full_body_b:{name:'Full Body B',focus:'Single-leg + shoulders/back',exercises:[
-  ['Dumbbell reverse lunge','3','8–10/leg'],['Kettlebell sumo deadlift','3','10–12'],
-  ['Dumbbell overhead press','3','8–12'],['Lat pulldown','3','8–12'],
-  ['Incline dumbbell press','2','10–12'],['Dumbbell curls','2','10–15'],['Dead bug','2','8–12/side']
- ]},
- full_body_c:{name:'Full Body C',focus:'Athletic/metabolic full body',exercises:[
+const historicalWorkoutC={name:'Full Body C',focus:'Athletic/metabolic full body',exercises:[
   ['Dumbbell split squat','3','8–10/leg'],['Dumbbell hip thrust/glute bridge','3','10–15'],
   ['Push-ups','3','8–15'],['Seated cable row or dumbbell row','3','10–12'],
   ['Dumbbell shoulder press','2','8–12'],['Kettlebell swings','3','15–20'],['Farmer carry','3','30–45 sec']
- ]}
-}
+ ] as const}
 
 function emptyWorkoutPlan(_logDate:string):WorkoutPlan{
  return {code:'full_body_a',completed:false,session:null,strengthOpportunity:true}
 }
 
-function getTraining(iso:string,plan:WorkoutPlan){
+function getTraining(iso:string,plan:WorkoutPlan,templates:WorkoutTemplate[]){
  const date=localDate(iso)
  const dayLabel=date.toLocaleDateString(undefined,{weekday:'short'}).toUpperCase()
  if(plan.code==='recovery')return {name:'Recovery + Movement',type:'Recovery',dayLabel,duration:'At your pace',kind:'recovery' as const}
  if(plan.code==='legacy_strength')return {name:'Legacy Strength Workout',type:'Historical strength',dayLabel,duration:'Logged workout',kind:'legacy' as const}
- return {...workouts[plan.code],type:'Strength',dayLabel,duration:'25–35 min',kind:'strength' as const}
+ if(plan.code==='full_body_c')return {...historicalWorkoutC,type:'Historical strength',dayLabel,duration:'25–35 min',kind:'strength' as const}
+ const template=resolveWorkoutTemplate({
+  code:plan.code,completed:plan.completed,snapshot:plan.session?.workout_snapshot??null,templates
+ })
+ return {...template,exercises:template.exercises.map(exercise=>[exercise.name,exercise.sets,exercise.reps] as const),type:'Strength',dayLabel,duration:'25–35 min',kind:'strength' as const}
 }
 
-const metricLabels:Record<MetricKey,string>={
- calories:'Calories',protein_g:'Protein',carbs_g:'Carbs',steps:'Steps',water_oz:'Water'
-}
 const errorText=(error:unknown)=>error instanceof Error?error.message:'Something went wrong. Please try again.'
 const parseMetric=(value:string,label:string)=>{
  if(value.trim()==='')return null
@@ -131,7 +124,15 @@ export default function Page(){
  const [weightLbs,setWeightLbs]=useState<number|null>(null)
  const [weightHistory,setWeightHistory]=useState<WeightHistory[]>([])
  const [workoutPlan,setWorkoutPlan]=useState<WorkoutPlan>(()=>emptyWorkoutPlan(localISO()))
- const [workoutFacts,setWorkoutFacts]=useState<{lastCompleted:'full_body_a'|'full_body_b'|null;completedThisWeek:number}|null>(null)
+ const [workoutFacts,setWorkoutFacts]=useState<{
+  lastCompleted:'full_body_a'|'full_body_b'|null
+  lastCompletedDate:string|null
+  completedThisWeek:number
+  strengthRecommended:boolean
+ }|null>(null)
+ const [workoutTemplates,setWorkoutTemplates]=useState<WorkoutTemplate[]>(()=>[
+  defaultWorkoutTemplate('full_body_a'),defaultWorkoutTemplate('full_body_b')
+ ])
  const [workoutBusy,setWorkoutBusy]=useState(false)
  const [entries,setEntries]=useState<NutritionEntry[]>([])
  const [totals,setTotals]=useState<DailyNutritionTotals>(()=>emptyDailyNutritionTotals(localISO()))
@@ -139,13 +140,12 @@ export default function Page(){
  const [nutritionBusy,setNutritionBusy]=useState<string|null>(null)
  const [nutritionError,setNutritionError]=useState('')
  const [nutritionNotice,setNutritionNotice]=useState<{text:string;entryId:string|null;logDate:string}|null>(null)
- const [quickMetric,setQuickMetric]=useState<MetricKey>('calories')
- const [quickValue,setQuickValue]=useState('')
  const [meal,setMeal]=useState<MealDraft>(blankMeal)
  const [mealOpen,setMealOpen]=useState(false)
  const [editingId,setEditingId]=useState<string|null>(null)
  const [editDraft,setEditDraft]=useState<EditDraft|null>(null)
- const training=getTraining(selectedDate,workoutPlan)
+ const [saveState,setSaveState]=useState<Record<string,string>>({})
+ const training=getTraining(selectedDate,workoutPlan,workoutTemplates)
  const today=profile?calendarDateInTimezone(profile.timezone):localISO()
  const isToday=selectedDate===today
  const selectedLabel=localDate(selectedDate).toLocaleDateString(undefined,{month:'short',day:'numeric'})
@@ -182,6 +182,10 @@ export default function Page(){
  },[session?.user.id,selectedDate,bootstrapStatus,activeGoal])
  useEffect(()=>{
   if(session&&bootstrapStatus==='dashboard-ready')void loadWeightHistory().catch(error=>setMsg(errorText(error)))
+ },[session?.user.id,bootstrapStatus])
+ useEffect(()=>{
+  if(!session||bootstrapStatus!=='dashboard-ready')return
+  void getWorkoutTemplates(supabase,session.user.id).then(setWorkoutTemplates).catch(error=>setMsg(errorText(error)))
  },[session?.user.id,bootstrapStatus])
 
  async function loadAccount(accountSession:Session){
@@ -288,7 +292,8 @@ export default function Page(){
       supabase,session.user.id,
       coachingWeek.start,
       coachingWeek.endExclusive,
-      logDate
+      logDate,
+      recommendedWeeklyWorkouts(profile?.exercise_frequency??'none')
      )
     :Promise.resolve(null)
   ])
@@ -345,39 +350,51 @@ export default function Page(){
   }catch(error){setMsg(errorText(error))}
  }
 
- async function persist(
-  nextMetrics:DailyMetrics,nextWeight:number|null,nextMeasurement:BodyMeasurement|null,successMessage='Saved'
- ){
-  if(!session)return false
-  const logDate=nextMetrics.log_date
-  setMsg('Saving')
-  const [metricsResult,weightResult]=await Promise.allSettled([
-   saveDailyMetrics(supabase,session.user.id,nextMetrics),
-   saveBodyWeight(supabase,{
-    userId:session.user.id,logDate,weightLbs:nextWeight,
-    existing:nextMeasurement,isToday:logDate===today
-   })
-  ])
-  if(weightResult.status==='fulfilled'){
-   try{await loadWeightHistory()}catch(error){
-    if(selectedDateRef.current===logDate)setMsg(errorText(error))
-   }
+ async function autosaveMetric(metric:AutosaveDailyMetricKey,value:number|string|null){
+  if(!session)return
+  const logDate=selectedDate
+  setSaveState(current=>({...current,[metric]:'Saving…'}))
+  try{
+   const saved=await saveDailyMetricField(supabase,session.user.id,logDate,metric,value)
+   if(selectedDateRef.current!==logDate)return
+   setMetrics(current=>({...current,id:saved.id,[metric]:saved[metric]}))
+   setSaveState(current=>({...current,[metric]:'Saved'}))
+  }catch(error){
+   if(selectedDateRef.current===logDate)setSaveState(current=>({...current,[metric]:errorText(error)}))
   }
-  if(selectedDateRef.current!==logDate)return metricsResult.status==='fulfilled'&&weightResult.status==='fulfilled'
-  if(metricsResult.status==='fulfilled')setMetrics(metricsResult.value)
-  if(weightResult.status==='fulfilled'){
-   setMeasurement(weightResult.value)
-   setWeightLbs(weightResult.value?.weight_lbs??null)
-  }
-  const errors=[]
-  if(metricsResult.status==='rejected')errors.push(errorText(metricsResult.reason))
-  if(weightResult.status==='rejected')errors.push(errorText(weightResult.reason))
-  if(errors.length){setMsg(errors.join(' '));return false}
-  setMsg(successMessage)
-  return true
  }
 
- async function save(){await persist(metrics,weightLbs,measurement)}
+ async function autosaveWeight(){
+  if(!session)return
+  const logDate=selectedDate
+  const nextWeight=weightLbs
+  const existing=measurement
+  setSaveState(current=>({...current,weight:'Saving…'}))
+  try{
+   const saved=await saveBodyWeight(supabase,{
+    userId:session.user.id,logDate,weightLbs:nextWeight,existing,isToday:logDate===today
+   })
+   await loadWeightHistory()
+   if(selectedDateRef.current!==logDate)return
+   setMeasurement(saved);setWeightLbs(saved?.weight_lbs??null)
+   setSaveState(current=>({...current,weight:'Saved'}))
+  }catch(error){
+   if(selectedDateRef.current===logDate)setSaveState(current=>({...current,weight:errorText(error)}))
+  }
+ }
+
+ async function replaceTotal(metric:CorrectableNutritionMetric,desired:number){
+  if(!session)return
+  const logDate=selectedDate
+  setSaveState(current=>({...current,[metric]:'Saving…'}))
+  try{
+   await replaceNutritionTotal(supabase,{userId:session.user.id,logDate,metric,desiredTotal:desired,totals})
+   await refreshNutrition(logDate)
+   if(selectedDateRef.current===logDate)setSaveState(current=>({...current,[metric]:'Saved'}))
+  }catch(error){
+   if(selectedDateRef.current===logDate)setSaveState(current=>({...current,[metric]:errorText(error)}))
+  }
+ }
 
  const targetForDay=targetLoading?null:selectedTarget
  const startWeight=activeGoal?.start_weight_lbs??0
@@ -398,14 +415,13 @@ export default function Page(){
   if(calories<=targetForDay.calorie_target_max+150)return ['Close','warn']
   return ['Over target','bad']
  },[totals,targetForDay])
- const weeklyWorkoutTarget=profile?recommendedWeeklyWorkouts(profile.exercise_frequency):2
  const nextWorkout=workoutFacts?nextBetaWorkout(workoutFacts.lastCompleted):'full_body_a'
+ const strengthSuppressed=isToday&&!workoutPlan.completed&&(!workoutFacts||!workoutFacts.strengthRecommended)
 
  const metricNumber=(key:'steps'|'water_oz',value:string)=>{
   setMetrics(current=>({...current,[key]:value===''?null:Number(value)}))
  }
- const changeDate=(days:number)=>{
-  const next=shiftDate(selectedDate,days)
+ const selectDate=(next:string)=>{
   if(next<=today){
    selectedDateRef.current=next
    setMetrics(emptyDailyMetrics(next))
@@ -418,50 +434,11 @@ export default function Page(){
    setEntries([])
    setTotals(emptyDailyNutritionTotals(next))
    setNutritionLoading(true)
+   setSaveState({})
    setSelectedDate(next)
   }
  }
-
- async function addQuick(event:FormEvent){
-  event.preventDefault()
-  if(!session||nutritionBusy)return
-  const amount=Number(quickValue)
-  if(!Number.isFinite(amount)||amount<=0){setNutritionError('Enter a value greater than zero.');return}
-  const logDate=selectedDate
-  setNutritionBusy('quick')
-  setNutritionError('')
-  try{
-   if(quickMetric==='steps'||quickMetric==='water_oz'){
-    const nextMetrics=await incrementDailyMetric(
-     supabase,session.user.id,logDate,quickMetric,amount
-    )
-    if(selectedDateRef.current===logDate){
-     setQuickValue('')
-     setMetrics(current=>({
-      ...current,
-      id:nextMetrics.id,
-      [quickMetric]:nextMetrics[quickMetric]
-     }))
-     setNutritionNotice({text:`Added ${metricLabels[quickMetric].toLowerCase()} ✓`,entryId:null,logDate})
-    }
-    return
-   }
-   const values:{calories:number|null;protein_g:number|null;carbs_g:number|null}={calories:null,protein_g:null,carbs_g:null}
-   values[quickMetric]=amount
-   const entry=await createNutritionEntry(supabase,{
-    userId:session.user.id,logDate,entryType:'quick_add',description:`Quick add: ${metricLabels[quickMetric]}`,
-    source:'quick_add',...values
-   })
-   if(selectedDateRef.current===logDate){
-    setQuickValue('')
-    setNutritionNotice({text:`Added ${metricLabels[quickMetric].toLowerCase()} ✓`,entryId:entry.id,logDate})
-   }
-   try{await refreshNutrition(logDate)}catch{
-    if(selectedDateRef.current===logDate)setNutritionError('Added successfully, but totals could not refresh. Reload to see the latest values.')
-   }
-  }catch(error){if(selectedDateRef.current===logDate)setNutritionError(errorText(error))}
-  finally{setNutritionBusy(null)}
- }
+ const changeDate=(days:number)=>selectDate(shiftDate(selectedDate,days))
 
  async function addMeal(event:FormEvent){
   event.preventDefault()
@@ -487,23 +464,6 @@ export default function Page(){
   finally{setNutritionBusy(null)}
  }
 
- async function addDrink(description:string){
-  if(!session||nutritionBusy)return
-  const logDate=selectedDate
-  setNutritionBusy(`drink:${description}`)
-  setNutritionError('')
-  try{
-   const entry=await createNutritionEntry(supabase,{
-    userId:session.user.id,logDate,entryType:'drink',description,source:'quick_add',calories:100,alcohol_servings:1
-   })
-   if(selectedDateRef.current===logDate)setNutritionNotice({text:`${description} added ✓`,entryId:entry.id,logDate})
-   try{await refreshNutrition(logDate)}catch{
-    if(selectedDateRef.current===logDate)setNutritionError(`${description} saved, but totals could not refresh. Reload to see the latest values.`)
-   }
-  }catch(error){if(selectedDateRef.current===logDate)setNutritionError(errorText(error))}
-  finally{setNutritionBusy(null)}
- }
-
  async function undoLastAdd(){
   if(!session||!nutritionNotice?.entryId||nutritionBusy)return
   const notice=nutritionNotice
@@ -521,6 +481,9 @@ export default function Page(){
   if(!session||workoutBusy)return
   const logDate=selectedDate
   const plan=workoutPlan
+  const template=plan.code==='full_body_a'||plan.code==='full_body_b'
+   ?resolveWorkoutTemplate({code:plan.code,completed:plan.completed,snapshot:plan.session?.workout_snapshot??null,templates:workoutTemplates})
+   :null
   setWorkoutBusy(true)
   setMsg('')
   try{
@@ -530,13 +493,17 @@ export default function Page(){
     code:plan.code,
     completed:!plan.completed,
     session:plan.session,
-    isToday:logDate===today
+    isToday:logDate===today,
+    workoutSnapshot:template?snapshotWorkout(template):null
    })
    const week=profile?calendarWeekBounds(profile.timezone):null
    const [refreshed,nextFacts]=await Promise.all([
     getWorkoutPlan(supabase,session.user.id,logDate),
     profile&&week&&logDate===today
-     ?getWorkoutCoachingFacts(supabase,session.user.id,week.start,week.endExclusive,logDate)
+     ?getWorkoutCoachingFacts(
+       supabase,session.user.id,week.start,week.endExclusive,logDate,
+       recommendedWeeklyWorkouts(profile.exercise_frequency)
+      )
      :Promise.resolve(null)
    ])
    if(selectedDateRef.current===logDate){
@@ -551,6 +518,7 @@ export default function Page(){
  }
 
  function beginEdit(entry:NutritionEntry){
+  if(entry.entry_type==='adjustment')return
   setNutritionError('')
   setEditingId(entry.id)
   setEditDraft({
@@ -585,7 +553,9 @@ export default function Page(){
   if(!session||nutritionBusy)return
   const warning=entry.source==='legacy'
    ?'Delete this imported daily total? This removes the historical nutrition baseline for the entire day and cannot be undone.'
-   :`Delete “${displayDescription(entry)}”?`
+   :entry.entry_type==='adjustment'
+    ?`Revert “${displayDescription(entry)}”?`
+    :`Delete “${displayDescription(entry)}”?`
   if(!window.confirm(warning))return
   const logDate=selectedDate
   setNutritionBusy(`delete:${entry.id}`)
@@ -669,10 +639,13 @@ export default function Page(){
    onClose={()=>setSettingsOpen(false)} onGoalSaved={finishGoalSettings} onProfileSaved={finishProfileSettings}
   />}
 
-  <div className="dateNav" aria-label="Select log date">
-   <button onClick={()=>changeDate(-1)} aria-label="Previous day">‹</button>
-   <strong>{localDate(selectedDate).toLocaleDateString(undefined,{month:'short',day:'numeric'}).toUpperCase()} <i>·</i> {training.dayLabel}</strong>
-   <button onClick={()=>changeDate(1)} disabled={isToday} aria-label="Next day">›</button>
+  <div className="dateNavRow">
+   <div className="dateNav" aria-label="Select log date">
+    <button onClick={()=>changeDate(-1)} aria-label="Previous day">‹</button>
+    <strong>{localDate(selectedDate).toLocaleDateString(undefined,{month:'short',day:'numeric'}).toUpperCase()} <i>·</i> {training.dayLabel}</strong>
+    <button onClick={()=>changeDate(1)} disabled={isToday} aria-label="Next day">›</button>
+   </div>
+   {!isToday&&<button className="todayButton" onClick={()=>selectDate(today)}>Today</button>}
   </div>
   {isToday&&hourInTimezone(profile.timezone)<4&&<button className="yesterdayShortcut" onClick={()=>changeDate(-1)}>Still logging yesterday?</button>}
 
@@ -682,23 +655,9 @@ export default function Page(){
     <p>Log a meal · Add your weight · Add your steps</p>
    </aside>}
 
-  {isToday&&workoutFacts&&targetForDay&&<section className="guidance" aria-labelledby="guidance-title">
-   <p className="eyebrow" id="guidance-title">TODAY'S GUIDANCE</p>
-   <div className="guidanceItems">
-    <span>{proteinGuidance({
-     knownProteinG:totals.protein_g,
-     proteinTargetG:targetForDay.protein_target_g,
-     unknownProteinEntryCount:totals.protein_unknown_count
-    })}</span>
-    <span>{stepsGuidance(metrics.steps,targetForDay.steps_target)}</span>
-    <span>Next up: {workoutName(nextWorkout)}</span>
-    <span>{weeklyTrainingGuidance(workoutFacts.completedThisWeek,weeklyWorkoutTarget)}</span>
-   </div>
-  </section>}
-
   <section className="trainingWrap">
    <p className="eyebrow">{isToday?"TODAY'S TRAINING":"PRESCRIBED TRAINING"}</p>
-   <details className="trainingCard">
+   {strengthSuppressed?<div className="trainingRestState"><strong>{workoutFacts?'No strength workout today':'Checking today’s training…'}</strong><span>{workoutFacts?`Next workout: ${workoutName(nextWorkout)}`:'Reviewing completed workouts'}</span></div>:<details className="trainingCard">
     <summary>
      <span className="trainingTitle"><strong>{training.name}</strong><small>{training.type} <i>·</i> {training.duration}</small></span>
      <span className="trainingToggle" aria-hidden="true">+</span>
@@ -711,7 +670,7 @@ export default function Page(){
        <strong>{exercise}</strong><span>{sets}</span><span>{reps}</span>
       </div>)}
      </div>}
-     {training.kind==='recovery'&&<div className="trainingNote"><strong>Goal: {formatTarget(targetForDay?.steps_target,0)}+ steps</strong><p>Optional easy cardio / mobility</p></div>}
+     {training.kind==='recovery'&&<div className="trainingNote"><strong>Goal: {formatTarget(targetForDay?.steps_target,0)}+ steps</strong><p>Recovery and everyday movement.</p></div>}
      {training.kind==='legacy'&&<div className="trainingNote"><strong>Historical strength session</strong><p>Exercise details were not recorded in the original CUT165 log.</p></div>}
      {workoutPlan.code==='legacy_strength'
       ?<div className={`completeWorkout readOnly ${workoutPlan.completed?'done':''}`} role="status"><span>{workoutPlan.completed?'Historical workout complete':'Historical workout record'}</span><b>{workoutPlan.completed?'✓':'·'}</b></div>
@@ -719,7 +678,8 @@ export default function Page(){
        <span>{workoutBusy?'Updating…':workoutPlan.completed?'Workout complete':'Mark workout complete'}</span><b>{workoutPlan.completed?'✓':'○'}</b>
       </button>}
     </div>
-   </details>
+   </details>}
+   <WorkoutTemplateEditor userId={session.user.id} templates={workoutTemplates} onChange={setWorkoutTemplates}/>
   </section>
 
   <section className={`goalCard p${Math.min(4,Math.floor(progress/25)+1)}`}>
@@ -733,17 +693,11 @@ export default function Page(){
    <span className={`signal ${status[1]}`}>● {status[0]}</span>
   </div>
 
-  <section className="quickAdd">
-   <form className="quickAddBar" onSubmit={addQuick}>
-    <span className="eyebrow">QUICK ADD</span>
-    <select value={quickMetric} onChange={event=>setQuickMetric(event.target.value as MetricKey)} aria-label="Metric to add">
-     <option value="calories">Calories</option><option value="protein_g">Protein</option><option value="carbs_g">Carbs</option><option value="water_oz">Water</option><option value="steps">Steps</option>
-    </select>
-    <input type="number" min="0" step={quickMetric==='steps'?'1':'any'} inputMode="decimal" placeholder="0" value={quickValue} onChange={event=>setQuickValue(event.target.value)} aria-label="Amount to add"/>
-    <button disabled={Number(quickValue)<=0||nutritionBusy!==null}>{nutritionBusy==='quick'?'Adding…':'+ Add'}</button>
-   </form>
+  <NutritionPresets userId={session.user.id} logDate={selectedDate} dateLabel={isToday?'today':selectedLabel} onLogged={()=>refreshNutrition(selectedDate)}/>
+
+  <section className="quickAdd oneOffMeal">
    <details className="addMeal" open={mealOpen} onToggle={event=>setMealOpen(event.currentTarget.open)}>
-    <summary>Add meal</summary>
+    <summary>Add one-off meal</summary>
     <form className="mealFields" onSubmit={addMeal}>
      <label className="mealDescription"><span>Description</span><input type="text" placeholder="Dinner" value={meal.description} onChange={event=>setMeal({...meal,description:event.target.value})} required/></label>
      <label><span>Meal</span><select value={meal.mealSlot} onChange={event=>setMeal({...meal,mealSlot:event.target.value as ''|MealSlot})}><option value="">Optional</option><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option><option value="snack">Snack</option></select></label>
@@ -760,23 +714,15 @@ export default function Page(){
   </section>
 
   <section className="metrics">
-   <NutritionMetric kind="calories" icon="◒" label="Calories" value={totals.calories} unit="kcal" target={`Goal · ${formatTarget(targetForDay?.calorie_target_min,0)}–${formatTarget(targetForDay?.calorie_target_max,0)}`} partial={totals.calories_unknown_count>0} loading={nutritionLoading}/>
-   <NutritionMetric kind="protein" icon="◆" label="Protein" value={totals.protein_g} unit="g" target={`Goal · ${formatTarget(targetForDay?.protein_target_g)}+`} partial={totals.protein_unknown_count>0} loading={nutritionLoading}/>
-   <Metric kind="steps" icon="↗" label="Steps" value={metrics.steps} unit="" target={`Goal · ${formatTarget(targetForDay?.steps_target,0)}+`} onChange={value=>metricNumber('steps',value)}/>
-   <Metric kind="weight" icon="●" label="Weight" value={displayWeight(weightLbs,weightUnit)} unit={weightUnit} target={`Destination · ${formatNumber(displayedTarget)} ${weightUnit}`} step=".1" onChange={value=>setWeightLbs(value===''?null:storedWeight(Number(value),weightUnit))}/>
+   <NutritionMetric kind="calories" icon="◒" label="Calories" value={totals.calories} unit="kcal" target={`Goal · ${targetForDay?formatTarget(primaryCalorieTarget(targetForDay.calorie_target_min,targetForDay.calorie_target_max),0):'—'} kcal`} partial={totals.calories_unknown_count>0} loading={nutritionLoading} saveState={saveState.calories} onSave={value=>replaceTotal('calories',value)}/>
+   <NutritionMetric kind="protein" icon="◆" label="Protein" value={totals.protein_g} unit="g" target={`Goal · ${formatTarget(targetForDay?.protein_target_g)}+`} partial={totals.protein_unknown_count>0} loading={nutritionLoading} saveState={saveState.protein_g} onSave={value=>replaceTotal('protein_g',value)}/>
+   <Metric kind="steps" icon="↗" label="Steps" value={metrics.steps} unit="" target={`Goal · ${formatTarget(targetForDay?.steps_target,0)}+`} saveState={saveState.steps} onChange={value=>metricNumber('steps',value)} onSave={()=>autosaveMetric('steps',metrics.steps)}/>
+   <Metric kind="weight" icon="●" label="Weight" value={displayWeight(weightLbs,weightUnit)} unit={weightUnit} target={`Destination · ${formatNumber(displayedTarget)} ${weightUnit}`} step=".1" saveState={saveState.weight} onChange={value=>setWeightLbs(value===''?null:storedWeight(Number(value),weightUnit))} onSave={autosaveWeight}/>
   </section>
 
   <section className="softGrid">
-   <label className="softCard"><span>Water <small>Goal · {formatTarget(targetForDay?.water_target_oz)} oz/day</small></span><div><input type="number" value={metrics.water_oz??''} placeholder="0" onChange={event=>metricNumber('water_oz',event.target.value)}/><b>/ {formatTarget(targetForDay?.water_target_oz)} oz</b></div></label>
+   <label className="softCard"><span>Water <small>Goal · {formatTarget(targetForDay?.water_target_oz)} oz/day</small></span><div><input type="number" value={metrics.water_oz??''} placeholder="0" onChange={event=>metricNumber('water_oz',event.target.value)} onBlur={()=>autosaveMetric('water_oz',metrics.water_oz)} onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur()}}/><b>/ {formatTarget(targetForDay?.water_target_oz)} oz</b></div>{saveState.water_oz&&<em className="fieldSaveState">{saveState.water_oz}</em>}</label>
    <article className="softCard nutritionSoft"><span>Carbs <small>{targetForDay?.carb_target_g===null?'No fixed target':targetForDay?`Goal · ${formatTarget(targetForDay.carb_target_g)}g`:'Loading target'}</small></span><div><strong>{nutritionLoading?'—':formatNumber(totals.carbs_g)}</strong><b>g</b>{totals.carbs_unknown_count>0&&<em>partial</em>}</div></article>
-  </section>
-
-  <section className="drinkCard">
-   <div><p className="eyebrow">DRINKS</p><h2>{nutritionLoading?'—':formatNumber(totals.alcohol_servings,2)} <span>{isToday?'drinks today':`drinks · ${selectedLabel}`}</span></h2><p>Quick adds include estimated alcohol calories in the daily total.</p></div>
-   <div className="drinkBtns">
-    <button onClick={()=>addDrink('Highball')} disabled={nutritionBusy!==null}>+ Highball <small>100 kcal</small></button>
-    <button onClick={()=>addDrink('Tequila soda')} disabled={nutritionBusy!==null}>+ Tequila soda <small>100 kcal</small></button>
-   </div>
   </section>
 
   <section className="nutritionEntries" aria-busy={nutritionLoading}>
@@ -787,39 +733,48 @@ export default function Page(){
     <form className="entryEdit" key={entry.id} onSubmit={event=>saveEntryEdit(event,entry)}>
      <div className="entryEditTop"><input type="text" value={editDraft.description} onChange={event=>setEditDraft({...editDraft,description:event.target.value})} aria-label="Description" required/><select value={editDraft.mealSlot} onChange={event=>setEditDraft({...editDraft,mealSlot:event.target.value as ''|MealSlot})} aria-label="Meal slot"><option value="">No meal slot</option><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option><option value="snack">Snack</option></select></div>
      <div className="entryEditMetrics"><label>Calories<input type="number" min="0" step="any" value={editDraft.calories} onChange={event=>setEditDraft({...editDraft,calories:event.target.value})}/></label><label>Protein<input type="number" min="0" step="any" value={editDraft.protein_g} onChange={event=>setEditDraft({...editDraft,protein_g:event.target.value})}/></label><label>Carbs<input type="number" min="0" step="any" value={editDraft.carbs_g} onChange={event=>setEditDraft({...editDraft,carbs_g:event.target.value})}/></label></div>
-     {entry.alcohol_servings!==null&&<small>Alcohol servings remain {formatNumber(entry.alcohol_servings,2)}.</small>}
+     {entry.alcohol_servings!==null&&entry.alcohol_servings>0&&<small>Alcohol servings remain {formatNumber(entry.alcohol_servings,2)}.</small>}
      <div className="entryActions"><button disabled={nutritionBusy!==null}>{nutritionBusy===`edit:${entry.id}`?'Saving…':'Save entry'}</button><button type="button" className="quiet" onClick={()=>{setEditingId(null);setEditDraft(null)}} disabled={nutritionBusy!==null}>Cancel</button><button type="button" className="delete" onClick={()=>removeEntry(entry)} disabled={nutritionBusy!==null}>Delete</button></div>
     </form>
     :<article className="entryRow" key={entry.id}>
      <div><span className="entryLabel">{entry.meal_slot||entry.entry_type.replace('_',' ')}</span><strong>{displayDescription(entry)}</strong><small>{entrySummary(entry)}</small></div>
-     <div className="entryRowActions"><button onClick={()=>beginEdit(entry)} disabled={nutritionBusy!==null}>Edit</button><button onClick={()=>removeEntry(entry)} disabled={nutritionBusy!==null}>Delete</button></div>
+     <div className="entryRowActions">{entry.entry_type!=='adjustment'&&<button onClick={()=>beginEdit(entry)} disabled={nutritionBusy!==null}>Edit</button>}<button onClick={()=>removeEntry(entry)} disabled={nutritionBusy!==null}>{entry.entry_type==='adjustment'?'Revert':'Delete'}</button></div>
     </article>)}
   </section>
 
-  <section className="movement"><button className={metrics.cardio_minutes?'done':''} onClick={()=>setMetrics(current=>({...current,cardio_minutes:current.cardio_minutes?null:30}))}><span>Optional Cardio</span><b>{metrics.cardio_minutes?`${metrics.cardio_minutes} min ✓`:'Add 30 min'}</b></button></section>
-
-  <label className="notes"><span>Notes</span><textarea placeholder="Dinner out, wine tasting, hunger, workout, anything useful..." value={metrics.notes||''} onChange={event=>setMetrics(current=>({...current,notes:event.target.value}))}/></label>
-
-  <button className="save" onClick={save}><span>{msg==='Saved'?'Saved ✓':msg==='Saving'?'Saving...':`Save ${isToday?'today':selectedLabel}`}</span><b>↗</b></button>
+  <label className="notes"><span>Notes {saveState.notes&&<small>{saveState.notes}</small>}</span><textarea placeholder="Dinner out, hunger, workout, anything useful..." value={metrics.notes||''} onChange={event=>setMetrics(current=>({...current,notes:event.target.value}))} onBlur={()=>autosaveMetric('notes',metrics.notes)}/></label>
  </main>
 }
 
-function NutritionMetric({kind,icon,label,value,unit,target,partial,loading}:{
+function NutritionMetric({kind,icon,label,value,unit,target,partial,loading,saveState,onSave}:{
  kind:string;icon:string;label:string;value:number|null;unit:string;target:string;partial:boolean;loading:boolean
+ saveState?:string;onSave:(value:number)=>Promise<void>
 }){
- return <article className={`metric ${kind} nutritionMetric`}>
+ const [draft,setDraft]=useState(value?.toString()??'')
+ useEffect(()=>setDraft(value?.toString()??''),[value])
+ const commit=()=>{
+  if(partial||draft.trim()==='')return
+  const desired=Number(draft)
+  if(!Number.isFinite(desired)||desired<0)return
+  if(desired===Number(value??0))return
+  void onSave(desired)
+ }
+ return <label className={`metric ${kind} nutritionMetric`}>
   <div className="metricTop"><i>{icon}</i><span>{label}</span>{partial&&<em>partial</em>}</div>
-  <div className="metricValue"><strong>{loading?'—':formatNumber(value)}</strong><b>{unit}</b></div>
+  <div className="metricValue"><input type="number" min="0" step="any" value={loading?'':draft} placeholder="—" disabled={loading||partial} onChange={event=>setDraft(event.target.value)} onBlur={commit} onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur()}}/><b>{unit}</b></div>
   <small>{target}</small>
- </article>
+  {partial?<em className="fieldSaveState">Complete partial entries before replacing this total.</em>:saveState&&<em className="fieldSaveState">{saveState}</em>}
+ </label>
 }
 
-function Metric({kind,icon,label,value,unit,target,onChange,step='1'}:{
- kind:string;icon:string;label:string;value:number|null;unit:string;target:string;onChange:(value:string)=>void;step?:string
+function Metric({kind,icon,label,value,unit,target,onChange,onSave,saveState,step='1'}:{
+ kind:string;icon:string;label:string;value:number|null;unit:string;target:string
+ onChange:(value:string)=>void;onSave:()=>void;saveState?:string;step?:string
 }){
  return <label className={`metric ${kind}`}>
   <div className="metricTop"><i>{icon}</i><span>{label}</span></div>
-  <div className="metricValue"><input type="number" step={step} value={value??''} placeholder="—" onChange={event=>onChange(event.target.value)}/><b>{unit}</b></div>
+  <div className="metricValue"><input type="number" min="0" step={step} value={value??''} placeholder="—" onChange={event=>onChange(event.target.value)} onBlur={onSave} onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur()}}/><b>{unit}</b></div>
   <small>{target}</small>
+  {saveState&&<em className="fieldSaveState">{saveState}</em>}
  </label>
 }

@@ -2,7 +2,7 @@ import type {SupabaseClient} from '@supabase/supabase-js'
 import type {Database,Tables} from './database.types'
 
 export type MealSlot='breakfast'|'lunch'|'dinner'|'snack'
-export type NutritionEntryType='food'|'drink'|'supplement'|'quick_add'|'legacy'
+export type NutritionEntryType='food'|'drink'|'supplement'|'quick_add'|'legacy'|'adjustment'
 export type NutritionSource='manual'|'quick_add'|'legacy'|'ai'|'import'
 
 type NutritionEntryRow=Tables<'nutrition_entries'>
@@ -44,6 +44,7 @@ export type CreateNutritionEntryInput=NutritionValues&{
  mealSlot?:MealSlot|null
  source:NutritionSource
  consumedAt?:string|null
+ sourceRef?:string|null
 }
 
 export type UpdateNutritionEntryInput={
@@ -61,7 +62,7 @@ const numberOrNull=(value:unknown)=>value===null||value===undefined?null:Number(
 const count=(value:unknown)=>Number(value||0)
 
 function normalizeEntryType(value:string):NutritionEntryType{
- if(value==='food'||value==='drink'||value==='supplement'||value==='quick_add'||value==='legacy')return value
+ if(value==='food'||value==='drink'||value==='supplement'||value==='quick_add'||value==='legacy'||value==='adjustment')return value
  throw new Error(`Unsupported nutrition entry type: ${value}`)
 }
 
@@ -115,19 +116,21 @@ function hasMetric(values:NutritionValues){
   .some(value=>value!==null&&value!==undefined)
 }
 
-function validateMetrics(values:NutritionValues){
+function validateMetrics(values:NutritionValues,allowSigned=false){
  for(const value of [values.calories,values.protein_g,values.carbs_g,values.fat_g,values.alcohol_servings]){
-  if(value!==null&&value!==undefined&&(!Number.isFinite(value)||value<0))throw new Error('Nutrition values must be valid non-negative numbers.')
+  if(value!==null&&value!==undefined&&(!Number.isFinite(value)||(!allowSigned&&value<0))){
+   throw new Error(allowSigned?'Nutrition adjustments must be valid numbers.':'Nutrition values must be valid non-negative numbers.')
+  }
  }
  if(!hasMetric(values))throw new Error('Add at least one nutrition value.')
 }
 
 function validateCreateInput(input:CreateNutritionEntryInput){
- validateMetrics(input)
- if(input.entryType==='quick_add'){
+ validateMetrics(input,input.entryType==='adjustment')
+ if(input.entryType==='adjustment'){
   const supplied=[input.calories,input.protein_g,input.carbs_g].filter(value=>value!==null&&value!==undefined)
-  if(supplied.length!==1||Number(supplied[0])<=0||input.fat_g!=null||input.alcohol_servings!=null){
-   throw new Error('Quick Add requires one positive calorie, protein, or carb value.')
+  if(supplied.length!==1||input.fat_g!=null||input.alcohol_servings!=null||!input.sourceRef?.trim()){
+   throw new Error('A correction requires one calorie, protein, or carb value and a source reference.')
   }
  }
 }
@@ -160,7 +163,8 @@ export async function createNutritionEntry(client:TypedSupabaseClient,input:Crea
   entry_type:input.entryType,meal_slot:input.mealSlot??null,description,
   calories:input.calories??null,protein_g:input.protein_g??null,
   carbs_g:input.carbs_g??null,fat_g:input.fat_g??null,
-  alcohol_servings:input.alcohol_servings??null,source:input.source
+  alcohol_servings:input.alcohol_servings??null,source:input.source,
+  source_ref:input.sourceRef??null
  }).select(entryColumns).single()
  if(error)throw error
  return normalizeEntry(data)
@@ -173,6 +177,9 @@ export async function updateNutritionEntry(
  const {data:existing,error:readError}=await client.from('nutrition_entries').select(entryColumns)
   .eq('id',entryId).eq('user_id',userId).eq('log_date',logDate).single()
  if(readError)throw readError
+ if(normalizeEntry(existing).entry_type==='adjustment'){
+  throw new Error('Daily corrections can be reverted, but not edited as food entries.')
+ }
  validateMetrics({...normalizeEntry(existing),...input})
  const {data,error}=await client.from('nutrition_entries').update({
   description,meal_slot:input.mealSlot,calories:input.calories,
@@ -180,6 +187,60 @@ export async function updateNutritionEntry(
  }).eq('id',entryId).eq('user_id',userId).eq('log_date',logDate).select(entryColumns).single()
  if(error)throw error
  return normalizeEntry(data)
+}
+
+export type CorrectableNutritionMetric='calories'|'protein_g'
+
+export function calculateNutritionCorrection(currentTotal:number|null,existingCorrection:number|null,desiredTotal:number){
+ if(!Number.isFinite(desiredTotal)||desiredTotal<0)throw new Error('Daily total must be a valid non-negative number.')
+ const underlying=(currentTotal??0)-(existingCorrection??0)
+ const correction=desiredTotal-underlying
+ return Math.abs(correction)<.0001?0:correction
+}
+
+export async function replaceNutritionTotal(client:TypedSupabaseClient,input:{
+ userId:string
+ logDate:string
+ metric:CorrectableNutritionMetric
+ desiredTotal:number
+ totals:DailyNutritionTotals
+}){
+ const {userId,logDate,metric,desiredTotal,totals}=input
+ const unknownCount=metric==='calories'?totals.calories_unknown_count:totals.protein_unknown_count
+ if(unknownCount>0)throw new Error('Complete the partial entries before replacing this total.')
+ const sourceRef=`daily-total-correction:${metric}:${logDate}`
+ const {data:existing,error:readError}=await client.from('nutrition_entries').select(entryColumns)
+  .eq('user_id',userId).eq('log_date',logDate).eq('entry_type','adjustment')
+  .eq('source','manual').eq('source_ref',sourceRef).maybeSingle()
+ if(readError)throw readError
+ const currentTotal=metric==='calories'?totals.calories:totals.protein_g
+ const existingCorrection=existing?(metric==='calories'?Number(existing.calories):Number(existing.protein_g)):null
+ const correction=calculateNutritionCorrection(currentTotal,existingCorrection,desiredTotal)
+ if(correction===0){
+  if(!existing)return null
+  const {data,error}=await client.from('nutrition_entries').delete()
+   .eq('id',existing.id).eq('user_id',userId).eq('log_date',logDate)
+   .eq('entry_type','adjustment').select('id').maybeSingle()
+  if(error)throw error
+  if(!data)throw new Error('Daily correction was not found or could not be removed.')
+  return null
+ }
+ const values={
+  description:metric==='calories'?'Daily calorie correction':'Daily protein correction',
+  calories:metric==='calories'?correction:null,
+  protein_g:metric==='protein_g'?correction:null
+ }
+ if(existing){
+  const {data,error}=await client.from('nutrition_entries').update(values)
+   .eq('id',existing.id).eq('user_id',userId).eq('log_date',logDate)
+   .eq('entry_type','adjustment').select(entryColumns).single()
+  if(error)throw error
+  return normalizeEntry(data)
+ }
+ return createNutritionEntry(client,{
+  userId,logDate,entryType:'adjustment',source:'manual',sourceRef,
+  description:values.description,calories:values.calories,protein_g:values.protein_g
+ })
 }
 
 export async function deleteNutritionEntry(client:TypedSupabaseClient,userId:string,logDate:string,entryId:string){

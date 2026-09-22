@@ -36,6 +36,7 @@ const activityMultiplier:Record<ActivityLevel,number>={
 }
 const clamp=(value:number,min:number,max:number)=>Math.min(max,Math.max(min,value))
 const roundTo=(value:number,increment:number)=>Math.round(value/increment)*increment
+export const primaryCalorieTarget=(minimum:number,maximum:number)=>roundTo((minimum+maximum)/2,10)
 export const recommendedSteps=(activity:ActivityLevel)=>({sedentary:5000,light:7000,moderate:8000,very_active:10000})[activity]
 export const recommendedWaterOz=(currentWeightLbs:number)=>clamp(roundTo(currentWeightLbs*.5,5),64,160)
 
@@ -136,7 +137,7 @@ export function calculateInitialTargets(input:TargetCalculationInput):Calculated
   waterTargetOz,
   weeklyWeightChangeTargetLbs:weeklyChange,
   maintenanceCalories:roundTo(maintenance,10),
-  primaryCalorieTarget:roundTo((calorieTargetMin+calorieTargetMax)/2,10)
+  primaryCalorieTarget:primaryCalorieTarget(calorieTargetMin,calorieTargetMax)
  }
 }
 

@@ -1,5 +1,7 @@
 import type {SupabaseClient} from '@supabase/supabase-js'
-import type {Database,Tables} from './database.types'
+import type {Database,Json,Tables} from './database.types'
+import {strengthRecommendation} from './coaching.ts'
+import type {WorkoutSnapshot} from './workout-templates'
 
 type WorkoutSessionRow=Tables<'workout_sessions'>
 type TypedSupabaseClient=SupabaseClient<Database>
@@ -81,10 +83,10 @@ export async function getWorkoutPlan(
 }
 
 export async function getWorkoutCoachingFacts(
- client:TypedSupabaseClient,userId:string,weekStart:string,weekEndExclusive:string,throughDate:string
+ client:TypedSupabaseClient,userId:string,weekStart:string,weekEndExclusive:string,throughDate:string,weeklyTarget:number
 ){
  const [latestResult,weekResult]=await Promise.all([
-  client.from('workout_sessions').select('workout_code')
+  client.from('workout_sessions').select('workout_code,scheduled_date')
    .eq('user_id',userId).eq('status','completed').in('workout_code',betaCodes)
    .lte('scheduled_date',throughDate).order('scheduled_date',{ascending:false})
    .order('created_at',{ascending:false}).limit(1).maybeSingle(),
@@ -100,16 +102,23 @@ export async function getWorkoutCoachingFacts(
   :null
  return {
   lastCompleted:lastCompleted==='full_body_a'||lastCompleted==='full_body_b'?lastCompleted:null,
-  completedThisWeek:(weekResult.data??[]).length
+  lastCompletedDate:latestResult.data?.scheduled_date??null,
+  completedThisWeek:(weekResult.data??[]).length,
+  strengthRecommended:strengthRecommendation({
+   logDate:throughDate,weeklyTarget,lastCompletedDate:latestResult.data?.scheduled_date??null,
+   completedThisWeek:(weekResult.data??[]).length
+  })
  }
 }
 
 async function updateSession(
- client:TypedSupabaseClient,userId:string,logDate:string,session:WorkoutSession,completed:boolean,isToday:boolean
+ client:TypedSupabaseClient,userId:string,logDate:string,session:WorkoutSession,completed:boolean,isToday:boolean,
+ workoutSnapshot:WorkoutSnapshot|null
 ){
  const {data,error}=await client.from('workout_sessions').update({
   status:completed?'completed':'planned',
-  completed_at:completed&&isToday?(session.completed_at||new Date().toISOString()):null
+  completed_at:completed&&isToday?(session.completed_at||new Date().toISOString()):null,
+  workout_snapshot:completed?(session.workout_snapshot??(workoutSnapshot as Json|null)):null
  }).eq('id',session.id).eq('user_id',userId).eq('scheduled_date',logDate)
   .select().single()
  if(error)throw error
@@ -123,12 +132,13 @@ export async function setWorkoutCompletion(client:TypedSupabaseClient,input:{
  completed:boolean
  session:WorkoutSession|null
  isToday:boolean
+ workoutSnapshot:WorkoutSnapshot|null
 }){
- const {userId,logDate,code,completed,session,isToday}=input
+ const {userId,logDate,code,completed,session,isToday,workoutSnapshot}=input
  if(code==='legacy_strength'||session?.workout_code==='legacy_strength'){
   throw new Error('Historical legacy workouts are read-only.')
  }
- if(session)return updateSession(client,userId,logDate,session,completed,isToday)
+ if(session)return updateSession(client,userId,logDate,session,completed,isToday,workoutSnapshot)
  if(!completed)return null
 
  const sourceRef=`cut365:${logDate}:${code}`
@@ -136,7 +146,7 @@ export async function setWorkoutCompletion(client:TypedSupabaseClient,input:{
   .eq('user_id',userId).eq('scheduled_date',logDate).eq('source','manual')
   .eq('source_ref',sourceRef).maybeSingle()
  if(readError)throw readError
- if(existing)return updateSession(client,userId,logDate,normalizeSession(existing),true,isToday)
+ if(existing)return updateSession(client,userId,logDate,normalizeSession(existing),true,isToday,workoutSnapshot)
 
  const {data,error}=await client.from('workout_sessions').insert({
   user_id:userId,
@@ -145,7 +155,8 @@ export async function setWorkoutCompletion(client:TypedSupabaseClient,input:{
   status:'completed',
   completed_at:isToday?new Date().toISOString():null,
   source:'manual',
-  source_ref:sourceRef
+  source_ref:sourceRef,
+  workout_snapshot:workoutSnapshot as Json|null
  }).select().single()
  if(error){
   if(error.code!=='23505')throw error
@@ -154,7 +165,7 @@ export async function setWorkoutCompletion(client:TypedSupabaseClient,input:{
    .eq('source_ref',sourceRef).maybeSingle()
   if(concurrentError)throw concurrentError
   if(!concurrent)throw error
-  return updateSession(client,userId,logDate,normalizeSession(concurrent),true,isToday)
+  return updateSession(client,userId,logDate,normalizeSession(concurrent),true,isToday,workoutSnapshot)
  }
  return normalizeSession(data)
 }

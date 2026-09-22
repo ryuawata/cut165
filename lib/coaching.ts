@@ -6,7 +6,7 @@ export type BetaWorkoutCode=Extract<StructuredWorkoutCode,'full_body_a'|'full_bo
 
 export function recommendedWeeklyWorkouts(frequency:ExerciseFrequency){
  if(frequency==='three_to_four')return 3
- if(frequency==='five_plus')return 4
+ if(frequency==='five_plus')return 3
  return 2
 }
 
@@ -23,25 +23,24 @@ export function calendarWeekBounds(timezone:string,date=new Date()){
  return {start,endExclusive:shiftCalendarDate(start,7)}
 }
 
-export function stepsGuidance(steps:number|null,target:number){
- const remaining=Math.max(target-(steps??0),0)
- return remaining===0?'Step target reached':`${remaining.toLocaleString()} steps to reach today's target`
+function calendarDayDistance(from:string,to:string){
+ const parse=(value:string)=>{
+  const [year,month,day]=value.split('-').map(Number)
+  return Date.UTC(year,month-1,day)
+ }
+ return Math.floor((parse(to)-parse(from))/86400000)
 }
 
-export function proteinGuidance(input:{
- knownProteinG:number|null
- proteinTargetG:number
- unknownProteinEntryCount:number
+export function strengthRecommendation(input:{
+ logDate:string
+ weeklyTarget:number
+ completedThisWeek:number
+ lastCompletedDate:string|null
 }){
- if(input.unknownProteinEntryCount>0)return 'Protein total is incomplete today'
- const remaining=Math.max(input.proteinTargetG-(input.knownProteinG??0),0)
- return remaining===0?'Protein target reached':`${remaining.toLocaleString()}g protein remaining`
-}
-
-export function weeklyTrainingGuidance(completed:number,target:number){
- return completed>=target
-  ?'Weekly training target complete'
-  :`${completed} of ${target} workouts this week`
+ if(input.completedThisWeek>=input.weeklyTarget)return false
+ if(!input.lastCompletedDate)return true
+ const minimumCalendarGap=input.weeklyTarget<=2?3:2
+ return calendarDayDistance(input.lastCompletedDate,input.logDate)>=minimumCalendarGap
 }
 
 export function workoutName(code:BetaWorkoutCode){

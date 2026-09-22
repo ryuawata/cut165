@@ -1,7 +1,7 @@
 import './globals.css'
 import './nutrition.css'
 import './product.css'
-import type {Metadata} from 'next'
+import type {Metadata,Viewport} from 'next'
 import {PRODUCT_NAME,SITE_DESCRIPTION,SITE_URL} from '../lib/site'
 
 export const metadata:Metadata={
@@ -20,6 +20,7 @@ export const metadata:Metadata={
  appleWebApp:{capable:true,title:PRODUCT_NAME,statusBarStyle:'default'},
  manifest:'/manifest.webmanifest'
 }
+export const viewport:Viewport={width:'device-width',initialScale:1}
 
 export default function RootLayout({children}:{children:React.ReactNode}){
  return <html lang="en"><body>{children}</body></html>

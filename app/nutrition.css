@@ -1,15 +1,15 @@
 .nutritionMetric .metricValue strong{font-size:48px;line-height:1;letter-spacing:-3px}
+.nutritionMetric input:disabled{color:#777;-webkit-text-fill-color:#777}.presetQuickAdd{margin:22px 0 18px;border:1px solid var(--line);border-radius:24px;padding:20px}.presetHead{display:flex;align-items:end;justify-content:space-between;gap:15px}.presetHead .eyebrow{margin-bottom:4px}.presetHead h3{margin:0;font-size:22px;letter-spacing:-.7px}.presetHead>button{border:0;border-radius:11px;background:#171717;color:#fff;padding:10px 13px;font-size:11px;font-weight:600}.presetRail{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-top:15px}.presetCard{border:1px solid var(--line);border-radius:16px;overflow:hidden}.presetLog{width:100%;min-height:112px;border:0;background:#f7f7f4;padding:14px;text-align:left;display:flex;flex-direction:column;align-items:flex-start}.presetLog strong{font-size:13px}.presetLog small{margin-top:5px;color:#777;line-height:1.4}.presetLog span{margin-top:auto;padding-top:11px;font-size:10px;font-weight:600}.presetCard>div{display:flex;border-top:1px solid var(--line)}.presetCard>div button{flex:1;border:0;background:#fff;padding:7px;color:#777;font-size:9px}.presetEmpty{margin:16px 0 0;color:#888;font-size:11px}.presetForm{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:16px;border-top:1px solid var(--line);padding-top:16px}.presetForm label{font-size:9px;font-weight:600}.presetForm .wide{grid-column:span 2}.presetForm input,.presetForm select{display:block;width:100%;margin-top:5px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:9px;font:11px 'DM Sans'}.presetActions{grid-column:1/-1;margin-top:4px}.oneOffMeal{margin:0 0 24px}
 .metricTop em,.nutritionSoft em{margin-left:auto;border-radius:20px;background:rgba(255,255,255,.75);padding:4px 7px;font-size:9px;font-style:normal;font-weight:600;letter-spacing:.3px;color:#8b6a24}
 .nutritionSoft div strong{font-size:32px;letter-spacing:-1.5px}
 .nutritionSoft div b{margin-left:4px}
 .nutritionSoft div em{margin-left:9px}
-.quickAddBar{grid-template-columns:auto minmax(120px,1fr) 100px auto}
 .mealFields{grid-template-columns:minmax(150px,2fr) minmax(100px,1fr) repeat(3,minmax(72px,1fr));align-items:end}
 .mealFields button{grid-column:1/-1;justify-self:end}
 .nutritionFeedback{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:11px;border-radius:11px;background:#edf7ef;padding:9px 11px;font-size:11px;color:#326845}
 .nutritionFeedback.error{background:#fff0ed;color:#9b3f31}
 .nutritionFeedback button{border:0;background:none;color:inherit;padding:0;text-decoration:underline;text-underline-offset:3px}
-.drinkBtns button:disabled,.entryRowActions button:disabled,.entryActions button:disabled{opacity:.45;cursor:default}
+.entryRowActions button:disabled,.entryActions button:disabled{opacity:.45;cursor:default}
 .nutritionEntries{margin-top:14px;border:1px solid var(--line);border-radius:24px;padding:22px}
 .nutritionEntriesHead{display:flex;align-items:end;justify-content:space-between;gap:20px;padding-bottom:14px}
 .nutritionEntriesHead .eyebrow{margin-bottom:4px}
@@ -40,10 +40,10 @@
  .mealFields{grid-template-columns:1fr 1fr}
  .mealFields .mealDescription{grid-column:1/-1}
  .mealFields button{grid-column:1/-1;width:100%;justify-self:stretch}
- .drinkBtns{display:grid;grid-template-columns:1fr 1fr}
  .entryRow{align-items:flex-start}
  .entryRowActions{display:grid}
  .entryEditTop{grid-template-columns:1fr}
  .nutritionEntries{padding:18px}
  .nutritionEntriesHead{align-items:center}
+ .presetQuickAdd{padding:17px}.presetRail{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:4px}.presetCard{min-width:210px;scroll-snap-align:start}.presetHead{align-items:center}.presetHead>button{padding:9px 11px}
 }

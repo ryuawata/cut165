@@ -10,6 +10,7 @@ type DailyMetricsProjection=Pick<DailyMetricsRow,
 export type DailyMetrics=Omit<DailyMetricsProjection,'id'>&{id:string|null}
 
 export type DailyMetricDeltaKey='steps'|'water_oz'
+export type AutosaveDailyMetricKey='steps'|'water_oz'|'notes'
 
 export function emptyDailyMetrics(logDate:string):DailyMetrics{
  return {id:null,log_date:logDate,steps:null,water_oz:null,cardio_minutes:null,notes:null}
@@ -75,6 +76,29 @@ export async function saveDailyMetrics(
  const {data,error}=await client.from('daily_metrics').insert({
   user_id:userId,log_date:metrics.log_date,...values
  }).select().single()
+ if(error)throw error
+ return normalizeRow(data)
+}
+
+export function dailyMetricPatch(metric:AutosaveDailyMetricKey,value:number|string|null){
+ if(metric==='steps'){
+  if(value!==null&&(!Number.isInteger(value)||Number(value)<0))throw new Error('Steps must be a non-negative whole number.')
+  return {steps:value===null?null:Number(value)}
+ }
+ if(metric==='water_oz'){
+  if(value!==null&&(!Number.isFinite(value)||Number(value)<0))throw new Error('Water must be a valid non-negative number.')
+  return {water_oz:value===null?null:Number(value)}
+ }
+ return {notes:normalizeNotes(value===null?null:String(value))}
+}
+
+export async function saveDailyMetricField(
+ client:TypedSupabaseClient,userId:string,logDate:string,metric:AutosaveDailyMetricKey,value:number|string|null
+){
+ const patch=dailyMetricPatch(metric,value)
+ const {data,error}=await client.from('daily_metrics').upsert({
+  user_id:userId,log_date:logDate,...patch
+ },{onConflict:'user_id,log_date'}).select('id,log_date,steps,water_oz,cardio_minutes,notes').single()
  if(error)throw error
  return normalizeRow(data)
 }
