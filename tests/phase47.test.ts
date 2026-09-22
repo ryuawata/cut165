@@ -10,7 +10,7 @@ import {
  createNutritionPreset,deleteNutritionPreset,logNutritionPreset,updateNutritionPreset,validateNutritionPreset,
  type NutritionPreset
 } from '../lib/nutrition-presets.ts'
-import {primaryCalorieTarget} from '../lib/targets.ts'
+import {caloriePace,primaryCalorieTarget} from '../lib/targets.ts'
 import {
  defaultWorkoutTemplate,getWorkoutTemplates,resolveWorkoutTemplate,snapshotWorkout,validateWorkoutTemplate
 } from '../lib/workout-templates.ts'
@@ -19,6 +19,9 @@ import {setWorkoutCompletion} from '../lib/workouts.ts'
 test('consumer calorie goal uses the rounded persisted-range midpoint',()=>{
  assert.equal(primaryCalorieTarget(1650,1850),1750)
  assert.equal(primaryCalorieTarget(1640,1830),1740)
+ assert.equal(caloriePace(1750,1650,1850),'on_pace')
+ assert.equal(caloriePace(1800,1650,1850),'close')
+ assert.equal(caloriePace(1910,1650,1850),'over')
 })
 
 test('workout templates fall back to starters and preserve completed snapshots',()=>{
@@ -202,6 +205,12 @@ test('onboarding consumer copy uses Gender once, keeps current weight in step on
  assert.doesNotMatch(source,/Energy estimate<select/)
  assert.equal(source.match(/>Current weight /g)?.length,1)
  assert.doesNotMatch(source,/>Range \{/)
+})
+
+test('profile frequency saves refresh today using the newly persisted profile',()=>{
+ const source=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8')
+ assert.match(source,/frequencyChanged=profile\?\.exercise_frequency!==nextProfile\.exercise_frequency/)
+ assert.match(source,/getTodayWorkoutCoachingFacts\(supabase,session\.user\.id,nextProfile,refreshInstant\)/)
 })
 
 test('mobile forms keep accessible zoom and 16px interactive text',()=>{

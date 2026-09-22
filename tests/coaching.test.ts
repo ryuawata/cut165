@@ -4,7 +4,7 @@ import {
  calendarWeekBounds,nextBetaWorkout,recommendedWeeklyWorkouts,strengthRecommendation
 } from '../lib/coaching.ts'
 import {
- getWorkoutCoachingFacts,getWorkoutPlan,nextStructuredWorkout,setWorkoutCompletion
+ getTodayWorkoutCoachingFacts,getWorkoutCoachingFacts,getWorkoutPlan,nextStructuredWorkout,setWorkoutCompletion
 } from '../lib/workouts.ts'
 import {PRODUCT_NAME,SITE_URL} from '../lib/site.ts'
 
@@ -85,43 +85,92 @@ test('calendar weeks use local Monday through Sunday boundaries',()=>{
  })
 })
 
-test('workout coaching counts only completed A/B sessions, excluding planned, skipped, recovery, and legacy history',async()=>{
- const filters:Array<[string,string,unknown]>=[]
+function coachingClient(options:{sequenceCode:'full_body_a'|'full_body_b'|null;strengthCode:'full_body_a'|'full_body_b'|'full_body_c'|'legacy_strength'|null;strengthDate:string|null;weekCount:number}){
+ const filters:Array<[number,string,string,unknown]>=[]
+ let queryIndex=0
  type QueryResult={data:Array<{id:string}>;error:null}
  class QueryMock implements PromiseLike<QueryResult>{
+  readonly index:number
+  constructor(index:number){this.index=index}
   select(){return this}
-  eq(column:string,value:unknown){filters.push(['eq',column,value]);return this}
-  in(column:string,value:unknown){filters.push(['in',column,value]);return this}
-  lte(column:string,value:unknown){filters.push(['lte',column,value]);return this}
-  gte(column:string,value:unknown){filters.push(['gte',column,value]);return this}
-  lt(column:string,value:unknown){filters.push(['lt',column,value]);return this}
+  eq(column:string,value:unknown){filters.push([this.index,'eq',column,value]);return this}
+  in(column:string,value:unknown){filters.push([this.index,'in',column,value]);return this}
+  lte(column:string,value:unknown){filters.push([this.index,'lte',column,value]);return this}
+  gte(column:string,value:unknown){filters.push([this.index,'gte',column,value]);return this}
+  lt(column:string,value:unknown){filters.push([this.index,'lt',column,value]);return this}
   order(){return this}
   limit(){return this}
-  async maybeSingle(){return {data:{workout_code:'full_body_a'},error:null}}
+  async maybeSingle(){
+   if(this.index===0)return {data:options.sequenceCode?{workout_code:options.sequenceCode,scheduled_date:'2026-09-18'}:null,error:null}
+   return {data:options.strengthCode&&options.strengthDate?{workout_code:options.strengthCode,scheduled_date:options.strengthDate}:null,error:null}
+  }
   then<TResult1=QueryResult,TResult2=never>(
    onfulfilled?:((value:QueryResult)=>TResult1|PromiseLike<TResult1>)|null,
    _onrejected?:((reason:unknown)=>TResult2|PromiseLike<TResult2>)|null
   ):PromiseLike<TResult1|TResult2>{
-   return Promise.resolve({data:[{id:'completed-session'}],error:null}).then(onfulfilled)
+   const data=Array.from({length:options.weekCount},(_,index)=>({id:`completed-${index}`}))
+   return Promise.resolve({data,error:null}).then(onfulfilled)
   }
  }
  const client={
   from(table:string){
    assert.equal(table,'workout_sessions')
-   return new QueryMock()
+   return new QueryMock(queryIndex++)
   }
  } as unknown as Parameters<typeof getWorkoutCoachingFacts>[0]
+ return {client,filters}
+}
+
+test('workout coaching separates A/B sequence from all-strength cadence history',async()=>{
+ const {client,filters}=coachingClient({
+  sequenceCode:'full_body_a',strengthCode:'full_body_c',strengthDate:'2026-09-19',weekCount:2
+ })
  const facts=await getWorkoutCoachingFacts(client,'user-123','2026-09-14','2026-09-21','2026-09-20',2)
- assert.deepEqual(facts,{lastCompleted:'full_body_a',lastCompletedDate:null,completedThisWeek:1,strengthRecommended:true})
- assert.equal(filters.filter(([,column,value])=>column==='user_id'&&value==='user-123').length,2)
- assert.equal(filters.filter(([,column,value])=>column==='status'&&value==='completed').length,2)
+ assert.deepEqual(facts,{lastCompleted:'full_body_a',lastCompletedDate:'2026-09-19',completedThisWeek:2,strengthRecommended:false})
+ assert.equal(nextBetaWorkout(facts.lastCompleted),'full_body_b')
+ assert.equal(filters.filter(([, ,column,value])=>column==='user_id'&&value==='user-123').length,3)
+ assert.equal(filters.filter(([, ,column,value])=>column==='status'&&value==='completed').length,3)
  assert.deepEqual(
-  filters.filter(([operator,column])=>operator==='in'&&column==='workout_code').map(([, ,value])=>value),
-  [['full_body_a','full_body_b'],['full_body_a','full_body_b']]
+  filters.filter(([,operator,column])=>operator==='in'&&column==='workout_code').map(([, , ,value])=>value),
+  [
+   ['full_body_a','full_body_b'],
+   ['full_body_a','full_body_b','full_body_c','legacy_strength'],
+   ['full_body_a','full_body_b','full_body_c','legacy_strength']
+  ]
  )
- assert.ok(filters.some(([operator,column,value])=>operator==='gte'&&column==='scheduled_date'&&value==='2026-09-14'))
- assert.ok(filters.some(([operator,column,value])=>operator==='lt'&&column==='scheduled_date'&&value==='2026-09-21'))
- assert.equal(filters.filter(([operator,column,value])=>operator==='lte'&&column==='scheduled_date'&&value==='2026-09-20').length,2)
+ assert.ok(filters.some(([,operator,column,value])=>operator==='gte'&&column==='scheduled_date'&&value==='2026-09-14'))
+ assert.ok(filters.some(([,operator,column,value])=>operator==='lt'&&column==='scheduled_date'&&value==='2026-09-21'))
+ assert.equal(filters.filter(([,operator,column,value])=>operator==='lte'&&column==='scheduled_date'&&value==='2026-09-20').length,3)
+})
+
+for(const strengthCode of ['full_body_c','legacy_strength'] as const){
+ test(`completed ${strengthCode} blocks next-day strength without advancing A/B`,async()=>{
+  const {client}=coachingClient({sequenceCode:'full_body_a',strengthCode,strengthDate:'2026-09-21',weekCount:1})
+  const facts=await getWorkoutCoachingFacts(client,'user-123','2026-09-21','2026-09-28','2026-09-22',3)
+  assert.equal(facts.lastCompleted,'full_body_a')
+  assert.equal(nextBetaWorkout(facts.lastCompleted),'full_body_b')
+  assert.equal(facts.lastCompletedDate,'2026-09-21')
+  assert.equal(facts.strengthRecommended,false)
+ })
+}
+
+test('weekly strength count includes completed non-A/B strength sessions',async()=>{
+ const {client}=coachingClient({sequenceCode:'full_body_b',strengthCode:'legacy_strength',strengthDate:'2026-09-19',weekCount:3})
+ const facts=await getWorkoutCoachingFacts(client,'user-123','2026-09-14','2026-09-21','2026-09-20',3)
+ assert.equal(facts.completedThisWeek,3)
+ assert.equal(facts.strengthRecommended,false)
+ assert.equal(nextBetaWorkout(facts.lastCompleted),'full_body_a')
+})
+
+test('a saved profile frequency can recompute today without reloading the dashboard',async()=>{
+ const now=new Date('2026-09-24T12:00:00Z')
+ const twoClient=coachingClient({sequenceCode:'full_body_a',strengthCode:'full_body_a',strengthDate:'2026-09-21',weekCount:2}).client
+ const threeClient=coachingClient({sequenceCode:'full_body_a',strengthCode:'full_body_a',strengthDate:'2026-09-21',weekCount:2}).client
+ const two=await getTodayWorkoutCoachingFacts(twoClient,'user-123',{timezone:'UTC',exercise_frequency:'one_to_two'},now)
+ const three=await getTodayWorkoutCoachingFacts(threeClient,'user-123',{timezone:'UTC',exercise_frequency:'three_to_four'},now)
+ assert.equal(two.strengthRecommended,false)
+ assert.equal(three.strengthRecommended,true)
+ assert.equal(three.logDate,'2026-09-24')
 })
 
 test('CUT365 is canonical while dynamic goal identities remain separate',()=>{

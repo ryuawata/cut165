@@ -15,7 +15,7 @@ import {
  type BodyMeasurement,type WeightHistory
 } from '../lib/body-measurements'
 import {
- getWorkoutCoachingFacts,getWorkoutPlan,setWorkoutCompletion,
+ getTodayWorkoutCoachingFacts,getWorkoutCoachingFacts,getWorkoutPlan,setWorkoutCompletion,
  type WorkoutPlan
 } from '../lib/workouts'
 import {
@@ -27,7 +27,7 @@ import {
  completeProfileOnboarding,dismissGettingStarted,getProfile,hasCompleteCalculationProfile,saveCompatibilityTimezone,type Profile
 } from '../lib/profile'
 import {getActiveGoal,getCurrentGoalTarget,getEffectiveGoalTarget,type Goal,type GoalTarget} from '../lib/goals'
-import {calendarDateInTimezone,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms,primaryCalorieTarget} from '../lib/targets'
+import {calendarDateInTimezone,caloriePace,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms,primaryCalorieTarget} from '../lib/targets'
 import {decideAccountBootstrap,decideCompatibilityTimezone} from '../lib/account-bootstrap'
 import {
  calendarWeekBounds,nextBetaWorkout,recommendedWeeklyWorkouts,workoutName
@@ -119,6 +119,7 @@ export default function Page(){
  const [selectedDate,setSelectedDate]=useState(localISO())
  const selectedDateRef=useRef(selectedDate)
  const loadSequence=useRef(0)
+ const workoutFactsSequence=useRef(0)
  const [metrics,setMetrics]=useState<DailyMetrics>(()=>emptyDailyMetrics(localISO()))
  const [measurement,setMeasurement]=useState<BodyMeasurement|null>(null)
  const [weightLbs,setWeightLbs]=useState<number|null>(null)
@@ -267,6 +268,7 @@ export default function Page(){
   if(!session)return
   if(selectedDateRef.current!==logDate)return
   const sequence=++loadSequence.current
+  const factsSequence=++workoutFactsSequence.current
   if(clearMessage)setMsg('')
   setMetrics(emptyDailyMetrics(logDate))
   setMeasurement(null)
@@ -313,8 +315,9 @@ export default function Page(){
   else setMsg(errorText(workoutResult.reason))
   if(targetResult.status==='fulfilled')setSelectedTarget(targetResult.value)
   else setMsg(errorText(targetResult.reason))
-  if(coachingResult.status==='fulfilled')setWorkoutFacts(coachingResult.value)
-  else setMsg(errorText(coachingResult.reason))
+  if(coachingResult.status==='fulfilled'){
+   if(factsSequence===workoutFactsSequence.current)setWorkoutFacts(coachingResult.value)
+  }else setMsg(errorText(coachingResult.reason))
   setTargetLoading(false)
   setNutritionLoading(false)
  }
@@ -411,8 +414,9 @@ export default function Page(){
   if(!targetForDay||totals.entry_count===0)return ['Open','open']
   if(totals.calories_unknown_count>0||totals.protein_unknown_count>0)return ['Partial','warn']
   const calories=Number(totals.calories||0)
-  if(calories<=targetForDay.calorie_target_max&&Number(totals.protein_g||0)>=targetForDay.protein_target_g)return ['On pace','good']
-  if(calories<=targetForDay.calorie_target_max+150)return ['Close','warn']
+  const pace=caloriePace(calories,targetForDay.calorie_target_min,targetForDay.calorie_target_max)
+  if(pace==='on_pace'&&Number(totals.protein_g||0)>=targetForDay.protein_target_g)return ['On pace','good']
+  if(pace!=='over')return ['Close','warn']
   return ['Over target','bad']
  },[totals,targetForDay])
  const nextWorkout=workoutFacts?nextBetaWorkout(workoutFacts.lastCompleted):'full_body_a'
@@ -497,6 +501,7 @@ export default function Page(){
     workoutSnapshot:template?snapshotWorkout(template):null
    })
    const week=profile?calendarWeekBounds(profile.timezone):null
+   const factsSequence=++workoutFactsSequence.current
    const [refreshed,nextFacts]=await Promise.all([
     getWorkoutPlan(supabase,session.user.id,logDate),
     profile&&week&&logDate===today
@@ -508,7 +513,7 @@ export default function Page(){
    ])
    if(selectedDateRef.current===logDate){
     setWorkoutPlan(refreshed)
-    if(nextFacts)setWorkoutFacts(nextFacts)
+    if(nextFacts&&factsSequence===workoutFactsSequence.current)setWorkoutFacts(nextFacts)
    }
   }catch(error){
    if(selectedDateRef.current===logDate)setMsg(errorText(error))
@@ -595,7 +600,23 @@ export default function Page(){
  }
 
  function finishProfileSettings(nextProfile:Profile){
+  const frequencyChanged=profile?.exercise_frequency!==nextProfile.exercise_frequency
   setProfile(nextProfile)
+  if(!session||!frequencyChanged)return
+  const refreshInstant=new Date()
+  const expectedDate=calendarDateInTimezone(nextProfile.timezone,refreshInstant)
+  if(selectedDateRef.current!==expectedDate)return
+  const factsSequence=++workoutFactsSequence.current
+  setWorkoutFacts(null)
+  void getTodayWorkoutCoachingFacts(supabase,session.user.id,nextProfile,refreshInstant).then(nextFacts=>{
+   if(factsSequence===workoutFactsSequence.current&&selectedDateRef.current===nextFacts.logDate){
+    setWorkoutFacts(nextFacts)
+   }
+  }).catch(error=>{
+   if(factsSequence===workoutFactsSequence.current&&selectedDateRef.current===expectedDate){
+    setMsg(errorText(error))
+   }
+  })
  }
 
  if(authLoading||bootstrapStatus==='auth-loading'||bootstrapStatus==='profile-loading')return <main className="bootstrapPage">

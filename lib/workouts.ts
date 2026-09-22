@@ -1,6 +1,8 @@
 import type {SupabaseClient} from '@supabase/supabase-js'
 import type {Database,Json,Tables} from './database.types'
-import {strengthRecommendation} from './coaching.ts'
+import {calendarWeekBounds,recommendedWeeklyWorkouts,strengthRecommendation} from './coaching.ts'
+import type {Profile} from './profile.ts'
+import {calendarDateInTimezone} from './targets.ts'
 import type {WorkoutSnapshot} from './workout-templates'
 
 type WorkoutSessionRow=Tables<'workout_sessions'>
@@ -25,7 +27,8 @@ export type WorkoutPlan={
  strengthOpportunity:boolean
 }
 
-const betaCodes:StructuredWorkoutCode[]=['full_body_a','full_body_b']
+const sequenceCodes:StructuredWorkoutCode[]=['full_body_a','full_body_b']
+const strengthCodes:WorkoutCode[]=['full_body_a','full_body_b','full_body_c','legacy_strength']
 
 function normalizeStructuredCode(value:string):StructuredWorkoutCode{
  if(value==='full_body_a'||value==='full_body_b'||value==='full_body_c')return value
@@ -69,7 +72,7 @@ export async function getWorkoutPlan(
    .eq('user_id',userId).eq('scheduled_date',logDate)
    .order('created_at',{ascending:false}).limit(1).maybeSingle(),
   client.from('workout_sessions').select('workout_code')
-   .eq('user_id',userId).eq('status','completed').in('workout_code',betaCodes)
+   .eq('user_id',userId).eq('status','completed').in('workout_code',sequenceCodes)
    .lt('scheduled_date',logDate).order('scheduled_date',{ascending:false})
    .order('created_at',{ascending:false}).limit(1).maybeSingle()
  ])
@@ -85,30 +88,48 @@ export async function getWorkoutPlan(
 export async function getWorkoutCoachingFacts(
  client:TypedSupabaseClient,userId:string,weekStart:string,weekEndExclusive:string,throughDate:string,weeklyTarget:number
 ){
- const [latestResult,weekResult]=await Promise.all([
+ const [sequenceResult,latestStrengthResult,weekResult]=await Promise.all([
   client.from('workout_sessions').select('workout_code,scheduled_date')
-   .eq('user_id',userId).eq('status','completed').in('workout_code',betaCodes)
+   .eq('user_id',userId).eq('status','completed').in('workout_code',sequenceCodes)
+   .lte('scheduled_date',throughDate).order('scheduled_date',{ascending:false})
+   .order('created_at',{ascending:false}).limit(1).maybeSingle(),
+  client.from('workout_sessions').select('scheduled_date')
+   .eq('user_id',userId).eq('status','completed').in('workout_code',strengthCodes)
    .lte('scheduled_date',throughDate).order('scheduled_date',{ascending:false})
    .order('created_at',{ascending:false}).limit(1).maybeSingle(),
   client.from('workout_sessions').select('id')
-   .eq('user_id',userId).eq('status','completed').in('workout_code',betaCodes)
+   .eq('user_id',userId).eq('status','completed').in('workout_code',strengthCodes)
    .gte('scheduled_date',weekStart).lt('scheduled_date',weekEndExclusive)
    .lte('scheduled_date',throughDate)
  ])
- if(latestResult.error)throw latestResult.error
+ if(sequenceResult.error)throw sequenceResult.error
+ if(latestStrengthResult.error)throw latestStrengthResult.error
  if(weekResult.error)throw weekResult.error
- const lastCompleted=latestResult.data
-  ?normalizeStructuredCode(latestResult.data.workout_code)
+ const lastCompleted=sequenceResult.data
+  ?normalizeStructuredCode(sequenceResult.data.workout_code)
   :null
  return {
   lastCompleted:lastCompleted==='full_body_a'||lastCompleted==='full_body_b'?lastCompleted:null,
-  lastCompletedDate:latestResult.data?.scheduled_date??null,
+  lastCompletedDate:latestStrengthResult.data?.scheduled_date??null,
   completedThisWeek:(weekResult.data??[]).length,
   strengthRecommended:strengthRecommendation({
-   logDate:throughDate,weeklyTarget,lastCompletedDate:latestResult.data?.scheduled_date??null,
+   logDate:throughDate,weeklyTarget,lastCompletedDate:latestStrengthResult.data?.scheduled_date??null,
    completedThisWeek:(weekResult.data??[]).length
   })
  }
+}
+
+export async function getTodayWorkoutCoachingFacts(
+ client:TypedSupabaseClient,userId:string,
+ profile:Pick<Profile,'timezone'|'exercise_frequency'>,now=new Date()
+){
+ const logDate=calendarDateInTimezone(profile.timezone,now)
+ const week=calendarWeekBounds(profile.timezone,now)
+ const facts=await getWorkoutCoachingFacts(
+  client,userId,week.start,week.endExclusive,logDate,
+  recommendedWeeklyWorkouts(profile.exercise_frequency)
+ )
+ return {logDate,...facts}
 }
 
 async function updateSession(

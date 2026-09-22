@@ -37,6 +37,12 @@ const activityMultiplier:Record<ActivityLevel,number>={
 const clamp=(value:number,min:number,max:number)=>Math.min(max,Math.max(min,value))
 const roundTo=(value:number,increment:number)=>Math.round(value/increment)*increment
 export const primaryCalorieTarget=(minimum:number,maximum:number)=>roundTo((minimum+maximum)/2,10)
+export function caloriePace(calories:number,minimum:number,maximum:number){
+ const target=primaryCalorieTarget(minimum,maximum)
+ if(calories<=target)return 'on_pace' as const
+ if(calories<=target+150)return 'close' as const
+ return 'over' as const
+}
 export const recommendedSteps=(activity:ActivityLevel)=>({sedentary:5000,light:7000,moderate:8000,very_active:10000})[activity]
 export const recommendedWaterOz=(currentWeightLbs:number)=>clamp(roundTo(currentWeightLbs*.5,5),64,160)
 
