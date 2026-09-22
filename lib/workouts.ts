@@ -22,7 +22,7 @@ export type WorkoutPlan={
  strengthOpportunity:boolean
 }
 
-const structuredCodes:StructuredWorkoutCode[]=['full_body_a','full_body_b','full_body_c']
+const betaCodes:StructuredWorkoutCode[]=['full_body_a','full_body_b']
 
 function normalizeStructuredCode(value:string):StructuredWorkoutCode{
  if(value==='full_body_a'||value==='full_body_b'||value==='full_body_c')return value
@@ -53,40 +53,20 @@ function normalizeSession(row:WorkoutSessionRow):WorkoutSession{
  }
 }
 
-function nextStructuredWorkout(previous:StructuredWorkoutCode|null):StructuredWorkoutCode{
+export function nextStructuredWorkout(previous:StructuredWorkoutCode|null):StructuredWorkoutCode{
  if(previous==='full_body_a')return 'full_body_b'
- if(previous==='full_body_b')return 'full_body_c'
  return 'full_body_a'
-}
-
-export function isStrengthOpportunity(logDate:string){
- const [year,month,day]=logDate.split('-').map(Number)
- const selected=Date.UTC(year,month-1,day)
- const anchor=Date.UTC(2026,7,27)
- const offset=Math.round((selected-anchor)/86400000)
- return Math.abs(offset)%2===0
 }
 
 export async function getWorkoutPlan(
  client:TypedSupabaseClient,userId:string,logDate:string
 ):Promise<WorkoutPlan>{
- const strengthOpportunity=isStrengthOpportunity(logDate)
-
- if(!strengthOpportunity){
-  const {data,error}=await client.from('workout_sessions').select()
-   .eq('user_id',userId).eq('scheduled_date',logDate).eq('workout_code','recovery')
-   .order('created_at',{ascending:false}).limit(1).maybeSingle()
-  if(error)throw error
-  const session=data?normalizeSession(data):null
-  return {code:'recovery',completed:session?.status==='completed',session,strengthOpportunity}
- }
-
  const [selectedResult,previousResult]=await Promise.all([
   client.from('workout_sessions').select()
-   .eq('user_id',userId).eq('scheduled_date',logDate).in('workout_code',structuredCodes)
+   .eq('user_id',userId).eq('scheduled_date',logDate)
    .order('created_at',{ascending:false}).limit(1).maybeSingle(),
   client.from('workout_sessions').select('workout_code')
-   .eq('user_id',userId).eq('status','completed').in('workout_code',structuredCodes)
+   .eq('user_id',userId).eq('status','completed').in('workout_code',betaCodes)
    .lt('scheduled_date',logDate).order('scheduled_date',{ascending:false})
    .order('created_at',{ascending:false}).limit(1).maybeSingle()
  ])
@@ -96,7 +76,31 @@ export async function getWorkoutPlan(
  const session=selectedResult.data?normalizeSession(selectedResult.data):null
  const previous=previousResult.data?normalizeStructuredCode(previousResult.data.workout_code):null
  const code=session?.workout_code||nextStructuredWorkout(previous)
- return {code,completed:session?.status==='completed',session,strengthOpportunity}
+ return {code,completed:session?.status==='completed',session,strengthOpportunity:code!=='recovery'}
+}
+
+export async function getWorkoutCoachingFacts(
+ client:TypedSupabaseClient,userId:string,weekStart:string,weekEndExclusive:string,throughDate:string
+){
+ const [latestResult,weekResult]=await Promise.all([
+  client.from('workout_sessions').select('workout_code')
+   .eq('user_id',userId).eq('status','completed').in('workout_code',betaCodes)
+   .lte('scheduled_date',throughDate).order('scheduled_date',{ascending:false})
+   .order('created_at',{ascending:false}).limit(1).maybeSingle(),
+  client.from('workout_sessions').select('id')
+   .eq('user_id',userId).eq('status','completed').in('workout_code',betaCodes)
+   .gte('scheduled_date',weekStart).lt('scheduled_date',weekEndExclusive)
+   .lte('scheduled_date',throughDate)
+ ])
+ if(latestResult.error)throw latestResult.error
+ if(weekResult.error)throw weekResult.error
+ const lastCompleted=latestResult.data
+  ?normalizeStructuredCode(latestResult.data.workout_code)
+  :null
+ return {
+  lastCompleted:lastCompleted==='full_body_a'||lastCompleted==='full_body_b'?lastCompleted:null,
+  completedThisWeek:(weekResult.data??[]).length
+ }
 }
 
 async function updateSession(

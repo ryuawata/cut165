@@ -7,8 +7,8 @@
 - Phase 3 daily metrics, body measurements, and workouts: complete in production.
 - The Phase 3 reconciliation migration has been applied and verified in production.
 - Phase 4 profiles, goals, onboarding, and dynamic targets: live.
-- Current phase: Phase 4.5 new-user onboarding hardening on the `cut365-phase-4-5` feature branch.
-- The Phase 4.5 migration has not been applied to production.
+- Phase 4.5 new-user onboarding hardening: live.
+- Current phase: Phase 4.6 beta coaching and domain cutover on the `cut365-phase-4-6` feature branch.
 
 ## Decisions
 
@@ -24,9 +24,13 @@
 - Profile Settings completes legacy calculation fields without changing goal history or recalculating targets; goal editing unlocks immediately after the profile save.
 - An incomplete legacy compatibility profile may replace the schema-default `UTC` placeholder with the browser-detected IANA timezone once; completed or customized profiles and historical `log_date` values remain unchanged.
 - Phase 4.5 adds a constrained exercise-frequency profile value and a persistent first-day prompt dismissal. Exercise frequency does not influence calorie estimates. New-user plans expose an editable step and water target, and unsafe requested dates are constrained to the fastest allowed pace.
+- Phase 4.6 derives a weekly training recommendation from exercise frequency: `none` and `one_to_two` map to 2 workouts, `three_to_four` maps to 3, and `five_plus` maps to 4. This is a training target only and remains excluded from calorie calculations.
+- Beta training alternates Full Body A and B from the user's most recent completed session. Planned, open, or skipped sessions do not advance the sequence. Weekly completion uses Monday–Sunday boundaries in the profile timezone.
+- Dashboard coaching is deterministic and derived from current profile, effective targets, daily facts, and workout history. It is never persisted as generated text, and incomplete protein totals never produce falsely precise remaining-protein guidance.
+- The canonical public product identity is CUT365 at `https://cut365.app`. Dynamic goal identities such as CUT165 remain intentional and distinct from the master brand.
 - Phase 4 deployment requires a server-only `SUPABASE_SECRET_KEY`; it must never be exposed as a `NEXT_PUBLIC_` variable.
 - Keep AI and photo logging out of this phase.
 
 ## Next task
 
-Review and apply the Phase 4.5 additive profile migration before deploying its application changes. Subscriptions, payments, AI coaching, photo logging, Apple Health, and native apps remain deferred.
+Before merging Phase 4.6, verify the Vercel production domain configuration treats `https://cut365.app` as primary and redirects `https://www.cut365.app` to it. In Supabase Auth, verify the Site URL is `https://cut365.app` and the production CUT365 origin is present in the allowed redirect URLs. No Phase 4.6 database migration is required. Subscriptions, payments, AI coaching, photo logging, Apple Health, and native apps remain deferred.

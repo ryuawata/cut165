@@ -13,7 +13,7 @@ import {
  type BodyMeasurement,type WeightHistory
 } from '../lib/body-measurements'
 import {
- getWorkoutPlan,isStrengthOpportunity,setWorkoutCompletion,
+ getWorkoutCoachingFacts,getWorkoutPlan,setWorkoutCompletion,
  type StructuredWorkoutCode,type WorkoutPlan
 } from '../lib/workouts'
 import {
@@ -27,6 +27,10 @@ import {
 import {getActiveGoal,getCurrentGoalTarget,getEffectiveGoalTarget,type Goal,type GoalTarget} from '../lib/goals'
 import {calendarDateInTimezone,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms} from '../lib/targets'
 import {decideAccountBootstrap,decideCompatibilityTimezone} from '../lib/account-bootstrap'
+import {
+ calendarWeekBounds,nextBetaWorkout,proteinGuidance,recommendedWeeklyWorkouts,
+ stepsGuidance,weeklyTrainingGuidance,workoutName
+} from '../lib/coaching'
 
 type MetricKey='calories'|'protein_g'|'carbs_g'|DailyMetricDeltaKey
 type MealDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string}
@@ -67,9 +71,8 @@ const workouts:Record<StructuredWorkoutCode,{name:string;focus:string;exercises:
  ]}
 }
 
-function emptyWorkoutPlan(logDate:string):WorkoutPlan{
- const strengthOpportunity=isStrengthOpportunity(logDate)
- return {code:strengthOpportunity?'full_body_a':'recovery',completed:false,session:null,strengthOpportunity}
+function emptyWorkoutPlan(_logDate:string):WorkoutPlan{
+ return {code:'full_body_a',completed:false,session:null,strengthOpportunity:true}
 }
 
 function getTraining(iso:string,plan:WorkoutPlan){
@@ -127,6 +130,7 @@ export default function Page(){
  const [weightLbs,setWeightLbs]=useState<number|null>(null)
  const [weightHistory,setWeightHistory]=useState<WeightHistory[]>([])
  const [workoutPlan,setWorkoutPlan]=useState<WorkoutPlan>(()=>emptyWorkoutPlan(localISO()))
+ const [workoutFacts,setWorkoutFacts]=useState<{lastCompleted:'full_body_a'|'full_body_b'|null;completedThisWeek:number}|null>(null)
  const [workoutBusy,setWorkoutBusy]=useState(false)
  const [entries,setEntries]=useState<NutritionEntry[]>([])
  const [totals,setTotals]=useState<DailyNutritionTotals>(()=>emptyDailyNutritionTotals(localISO()))
@@ -263,20 +267,32 @@ export default function Page(){
   setMeasurement(null)
   setWeightLbs(null)
   setWorkoutPlan(emptyWorkoutPlan(logDate))
+  setWorkoutFacts(null)
   setTargetLoading(true)
   setEntries([])
   setTotals(emptyDailyNutritionTotals(logDate))
   setNutritionLoading(true)
+  const coachingWeek=profile&&logDate===calendarDateInTimezone(profile.timezone)
+   ?calendarWeekBounds(profile.timezone)
+   :null
   const results=await Promise.allSettled([
    getDailyMetrics(supabase,session.user.id,logDate),
    getBodyMeasurement(supabase,session.user.id,logDate),
    getNutritionEntries(supabase,session.user.id,logDate),
    getDailyNutritionTotals(supabase,session.user.id,logDate),
    getWorkoutPlan(supabase,session.user.id,logDate),
-   activeGoal?getEffectiveGoalTarget(supabase,session.user.id,activeGoal.id,logDate):Promise.resolve(null)
+   activeGoal?getEffectiveGoalTarget(supabase,session.user.id,activeGoal.id,logDate):Promise.resolve(null),
+   coachingWeek
+    ?getWorkoutCoachingFacts(
+      supabase,session.user.id,
+      coachingWeek.start,
+      coachingWeek.endExclusive,
+      logDate
+     )
+    :Promise.resolve(null)
   ])
   if(sequence!==loadSequence.current||selectedDateRef.current!==logDate)return
-  const [metricsResult,measurementResult,entriesResult,totalsResult,workoutResult,targetResult]=results
+  const [metricsResult,measurementResult,entriesResult,totalsResult,workoutResult,targetResult,coachingResult]=results
   if(metricsResult.status==='fulfilled')setMetrics(metricsResult.value)
   else setMsg(errorText(metricsResult.reason))
   if(measurementResult.status==='fulfilled'){
@@ -291,6 +307,8 @@ export default function Page(){
   else setMsg(errorText(workoutResult.reason))
   if(targetResult.status==='fulfilled')setSelectedTarget(targetResult.value)
   else setMsg(errorText(targetResult.reason))
+  if(coachingResult.status==='fulfilled')setWorkoutFacts(coachingResult.value)
+  else setMsg(errorText(coachingResult.reason))
   setTargetLoading(false)
   setNutritionLoading(false)
  }
@@ -379,6 +397,8 @@ export default function Page(){
   if(calories<=targetForDay.calorie_target_max+150)return ['Close','warn']
   return ['Over target','bad']
  },[totals,targetForDay])
+ const weeklyWorkoutTarget=profile?recommendedWeeklyWorkouts(profile.exercise_frequency):2
+ const nextWorkout=workoutFacts?nextBetaWorkout(workoutFacts.lastCompleted):'full_body_a'
 
  const metricNumber=(key:'steps'|'water_oz',value:string)=>{
   setMetrics(current=>({...current,[key]:value===''?null:Number(value)}))
@@ -391,6 +411,7 @@ export default function Page(){
    setMeasurement(null)
    setWeightLbs(null)
    setWorkoutPlan(emptyWorkoutPlan(next))
+   setWorkoutFacts(null)
    setSelectedTarget(null)
    setTargetLoading(true)
    setEntries([])
@@ -510,8 +531,17 @@ export default function Page(){
     session:plan.session,
     isToday:logDate===today
    })
-   const refreshed=await getWorkoutPlan(supabase,session.user.id,logDate)
-   if(selectedDateRef.current===logDate)setWorkoutPlan(refreshed)
+   const week=profile?calendarWeekBounds(profile.timezone):null
+   const [refreshed,nextFacts]=await Promise.all([
+    getWorkoutPlan(supabase,session.user.id,logDate),
+    profile&&week&&logDate===today
+     ?getWorkoutCoachingFacts(supabase,session.user.id,week.start,week.endExclusive,logDate)
+     :Promise.resolve(null)
+   ])
+   if(selectedDateRef.current===logDate){
+    setWorkoutPlan(refreshed)
+    if(nextFacts)setWorkoutFacts(nextFacts)
+   }
   }catch(error){
    if(selectedDateRef.current===logDate)setMsg(errorText(error))
   }finally{
@@ -650,6 +680,20 @@ export default function Page(){
     <div className="gettingStartedHead"><strong>Start your first day</strong><button onClick={dismissFirstDay} aria-label="Dismiss getting started">×</button></div>
     <p>Log a meal · Add your weight · Add your steps</p>
    </aside>}
+
+  {isToday&&workoutFacts&&targetForDay&&<section className="guidance" aria-labelledby="guidance-title">
+   <p className="eyebrow" id="guidance-title">TODAY'S GUIDANCE</p>
+   <div className="guidanceItems">
+    <span>{proteinGuidance({
+     knownProteinG:totals.protein_g,
+     proteinTargetG:targetForDay.protein_target_g,
+     unknownProteinEntryCount:totals.protein_unknown_count
+    })}</span>
+    <span>{stepsGuidance(metrics.steps,targetForDay.steps_target)}</span>
+    <span>Next up: {workoutName(nextWorkout)}</span>
+    <span>{weeklyTrainingGuidance(workoutFacts.completedThisWeek,weeklyWorkoutTarget)}</span>
+   </div>
+  </section>}
 
   <section className="trainingWrap">
    <p className="eyebrow">{isToday?"TODAY'S TRAINING":"PRESCRIBED TRAINING"}</p>
