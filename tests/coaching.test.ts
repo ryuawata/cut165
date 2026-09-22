@@ -4,7 +4,9 @@ import {
  calendarWeekBounds,nextBetaWorkout,proteinGuidance,recommendedWeeklyWorkouts,
  stepsGuidance,weeklyTrainingGuidance
 } from '../lib/coaching.ts'
-import {getWorkoutCoachingFacts} from '../lib/workouts.ts'
+import {
+ getWorkoutCoachingFacts,getWorkoutPlan,nextStructuredWorkout,setWorkoutCompletion
+} from '../lib/workouts.ts'
 import {PRODUCT_NAME,SITE_URL} from '../lib/site.ts'
 
 test('exercise frequency maps to a weekly training recommendation',()=>{
@@ -18,6 +20,50 @@ test('completed A/B history determines the next workout',()=>{
  assert.equal(nextBetaWorkout(null),'full_body_a')
  assert.equal(nextBetaWorkout('full_body_a'),'full_body_b')
  assert.equal(nextBetaWorkout('full_body_b'),'full_body_a')
+})
+
+test('legacy strength history remains distinct and does not advance the A/B rotation',()=>{
+ assert.equal(nextStructuredWorkout('legacy_strength'),'full_body_a')
+})
+
+test('getWorkoutPlan reads a historical legacy strength session safely',async()=>{
+ const legacySession={
+  id:'legacy-session',user_id:'user-123',scheduled_date:'2026-08-25',
+  workout_code:'legacy_strength',status:'completed',source:'legacy',
+  source_ref:'daily_logs:legacy:strength',completed_at:null,duration_minutes:null,
+  notes:null,created_at:'2026-09-10T00:00:00Z',updated_at:'2026-09-10T00:00:00Z'
+ }
+ let queryIndex=0
+ class QueryMock{
+  readonly result:typeof legacySession|null
+  constructor(result:typeof legacySession|null){this.result=result}
+  select(){return this}
+  eq(){return this}
+  in(){return this}
+  lt(){return this}
+  order(){return this}
+  limit(){return this}
+  async maybeSingle(){return {data:this.result,error:null}}
+ }
+ const client={
+  from(table:string){
+   assert.equal(table,'workout_sessions')
+   return new QueryMock(queryIndex++===0?legacySession:null)
+  }
+ } as unknown as Parameters<typeof getWorkoutPlan>[0]
+ const plan=await getWorkoutPlan(client,'user-123','2026-08-25')
+ assert.equal(plan.code,'legacy_strength')
+ assert.equal(plan.session?.workout_code,'legacy_strength')
+ assert.equal(plan.completed,true)
+ assert.equal(plan.strengthOpportunity,true)
+})
+
+test('normal workout creation rejects the historical legacy code',async()=>{
+ const client={from(){throw new Error('Database should not be called')}} as unknown as Parameters<typeof setWorkoutCompletion>[0]
+ await assert.rejects(setWorkoutCompletion(client,{
+  userId:'user-123',logDate:'2026-09-21',code:'legacy_strength',completed:true,
+  session:null,isToday:true
+ }),/read-only/)
 })
 
 test('calendar weeks use local Monday through Sunday boundaries',()=>{
@@ -76,6 +122,10 @@ test('workout coaching counts the current week and excludes incomplete sessions'
  assert.deepEqual(facts,{lastCompleted:'full_body_a',completedThisWeek:1})
  assert.equal(filters.filter(([,column,value])=>column==='user_id'&&value==='user-123').length,2)
  assert.equal(filters.filter(([,column,value])=>column==='status'&&value==='completed').length,2)
+ assert.deepEqual(
+  filters.filter(([operator,column])=>operator==='in'&&column==='workout_code').map(([, ,value])=>value),
+  [['full_body_a','full_body_b'],['full_body_a','full_body_b']]
+ )
  assert.ok(filters.some(([operator,column,value])=>operator==='gte'&&column==='scheduled_date'&&value==='2026-09-14'))
  assert.ok(filters.some(([operator,column,value])=>operator==='lt'&&column==='scheduled_date'&&value==='2026-09-21'))
  assert.equal(filters.filter(([operator,column,value])=>operator==='lte'&&column==='scheduled_date'&&value==='2026-09-20').length,2)

@@ -79,6 +79,7 @@ function getTraining(iso:string,plan:WorkoutPlan){
  const date=localDate(iso)
  const dayLabel=date.toLocaleDateString(undefined,{weekday:'short'}).toUpperCase()
  if(plan.code==='recovery')return {name:'Recovery + Movement',type:'Recovery',dayLabel,duration:'At your pace',kind:'recovery' as const}
+ if(plan.code==='legacy_strength')return {name:'Legacy Strength Workout',type:'Historical strength',dayLabel,duration:'Logged workout',kind:'legacy' as const}
  return {...workouts[plan.code],type:'Strength',dayLabel,duration:'25–35 min',kind:'strength' as const}
 }
 
@@ -711,9 +712,12 @@ export default function Page(){
       </div>)}
      </div>}
      {training.kind==='recovery'&&<div className="trainingNote"><strong>Goal: {formatTarget(targetForDay?.steps_target,0)}+ steps</strong><p>Optional easy cardio / mobility</p></div>}
-     <button className={`completeWorkout ${workoutPlan.completed?'done':''}`} onClick={toggleWorkout} disabled={workoutBusy}>
-      <span>{workoutBusy?'Updating…':workoutPlan.completed?'Workout complete':'Mark workout complete'}</span><b>{workoutPlan.completed?'✓':'○'}</b>
-     </button>
+     {training.kind==='legacy'&&<div className="trainingNote"><strong>Historical strength session</strong><p>Exercise details were not recorded in the original CUT165 log.</p></div>}
+     {workoutPlan.code==='legacy_strength'
+      ?<div className={`completeWorkout readOnly ${workoutPlan.completed?'done':''}`} role="status"><span>{workoutPlan.completed?'Historical workout complete':'Historical workout record'}</span><b>{workoutPlan.completed?'✓':'·'}</b></div>
+      :<button className={`completeWorkout ${workoutPlan.completed?'done':''}`} onClick={toggleWorkout} disabled={workoutBusy}>
+       <span>{workoutBusy?'Updating…':workoutPlan.completed?'Workout complete':'Mark workout complete'}</span><b>{workoutPlan.completed?'✓':'○'}</b>
+      </button>}
     </div>
    </details>
   </section>

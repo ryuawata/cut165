@@ -5,7 +5,8 @@ type WorkoutSessionRow=Tables<'workout_sessions'>
 type TypedSupabaseClient=SupabaseClient<Database>
 
 export type StructuredWorkoutCode='full_body_a'|'full_body_b'|'full_body_c'
-export type WorkoutCode=StructuredWorkoutCode|'recovery'
+export type HistoricalWorkoutCode='legacy_strength'
+export type WorkoutCode=StructuredWorkoutCode|'recovery'|HistoricalWorkoutCode
 export type WorkoutStatus='planned'|'completed'|'skipped'
 export type WorkoutSource='manual'|'schedule'|'legacy'|'ai'
 
@@ -30,7 +31,7 @@ function normalizeStructuredCode(value:string):StructuredWorkoutCode{
 }
 
 function normalizeCode(value:string):WorkoutCode{
- if(value==='recovery')return value
+ if(value==='recovery'||value==='legacy_strength')return value
  return normalizeStructuredCode(value)
 }
 
@@ -53,7 +54,7 @@ function normalizeSession(row:WorkoutSessionRow):WorkoutSession{
  }
 }
 
-export function nextStructuredWorkout(previous:StructuredWorkoutCode|null):StructuredWorkoutCode{
+export function nextStructuredWorkout(previous:WorkoutCode|null):StructuredWorkoutCode{
  if(previous==='full_body_a')return 'full_body_b'
  return 'full_body_a'
 }
@@ -124,6 +125,9 @@ export async function setWorkoutCompletion(client:TypedSupabaseClient,input:{
  isToday:boolean
 }){
  const {userId,logDate,code,completed,session,isToday}=input
+ if(code==='legacy_strength'||session?.workout_code==='legacy_strength'){
+  throw new Error('Historical legacy workouts are read-only.')
+ }
  if(session)return updateSession(client,userId,logDate,session,completed,isToday)
  if(!completed)return null
 
