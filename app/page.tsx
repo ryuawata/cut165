@@ -1,5 +1,5 @@
 'use client'
-import {FormEvent,useEffect,useMemo,useRef,useState} from 'react'
+import {FormEvent,useCallback,useEffect,useMemo,useRef,useState} from 'react'
 import type {Session} from '@supabase/supabase-js'
 import Onboarding,{type AccountSetup} from './onboarding'
 import GoalSettings from './goal-settings'
@@ -9,8 +9,8 @@ import CustomWorkouts from './custom-workouts'
 import PeriodProgressView from './period-progress'
 import {supabase} from '../lib/supabase'
 import {
- emptyDailyMetrics,getDailyMetrics,incrementMetricValue,saveDailyMetricField,
- type AutosaveDailyMetricKey,type DailyMetrics
+ createSerializedSaveQueue,emptyDailyMetrics,getDailyMetrics,incrementMetricValue,saveDailyMetricField,
+ type DailyMetrics
 } from '../lib/daily-metrics'
 import {
  getBodyMeasurement,getRecentWeights,saveBodyWeight,
@@ -123,7 +123,7 @@ export default function Page(){
  const loadSequence=useRef(0)
  const workoutFactsSequence=useRef(0)
  const periodSequence=useRef(0)
- const waterSaveQueue=useRef<Promise<void>>(Promise.resolve())
+ const [waterSaveQueue]=useState(createSerializedSaveQueue)
  const waterValueRef=useRef<number|null>(null)
  const [trackingView,setTrackingView]=useState<TrackingView>('day')
  const [periodAnchor,setPeriodAnchor]=useState(localISO())
@@ -159,6 +159,20 @@ export default function Page(){
  const today=profile?calendarDateInTimezone(profile.timezone):localISO()
  const isToday=selectedDate===today
  const selectedLabel=localDate(selectedDate).toLocaleDateString(undefined,{month:'short',day:'numeric'})
+
+ const refreshPeriod=useCallback((
+  view:Exclude<TrackingView,'day'>,anchorDate:string,userId:string,goalId:string
+ )=>{
+  const sequence=++periodSequence.current
+  setPeriodLoading(true);setMsg('')
+  return getPeriodProgress(supabase,{userId,goalId,view,anchorDate}).then(data=>{
+   if(sequence===periodSequence.current)setPeriodData(data)
+  }).catch(error=>{
+   if(sequence===periodSequence.current)setMsg(errorText(error))
+  }).finally(()=>{
+   if(sequence===periodSequence.current)setPeriodLoading(false)
+  })
+ },[])
 
  useEffect(()=>{waterValueRef.current=metrics.water_oz},[metrics.water_oz])
 
@@ -197,14 +211,8 @@ export default function Page(){
  },[session?.user.id,bootstrapStatus])
  useEffect(()=>{
   if(trackingView==='day'||!session||!activeGoal||bootstrapStatus!=='dashboard-ready')return
-  const sequence=++periodSequence.current
-  setPeriodLoading(true);setMsg('')
-  void getPeriodProgress(supabase,{
-   userId:session.user.id,goalId:activeGoal.id,view:trackingView,anchorDate:periodAnchor
-  }).then(data=>{if(sequence===periodSequence.current)setPeriodData(data)}).catch(error=>{
-   if(sequence===periodSequence.current)setMsg(errorText(error))
-  }).finally(()=>{if(sequence===periodSequence.current)setPeriodLoading(false)})
- },[trackingView,periodAnchor,session?.user.id,activeGoal?.id,bootstrapStatus])
+  void refreshPeriod(trackingView,periodAnchor,session.user.id,activeGoal.id)
+ },[trackingView,periodAnchor,session?.user.id,activeGoal?.id,bootstrapStatus,refreshPeriod])
  useEffect(()=>{
   if(!session||bootstrapStatus!=='dashboard-ready')return
   void getWorkoutTemplates(supabase,session.user.id).then(setWorkoutTemplates).catch(error=>setMsg(errorText(error)))
@@ -374,7 +382,7 @@ export default function Page(){
   }catch(error){setMsg(errorText(error))}
  }
 
- async function autosaveMetric(metric:AutosaveDailyMetricKey,value:number|string|null){
+ async function autosaveMetric(metric:'steps'|'notes',value:number|string|null){
   if(!session)return
   const logDate=selectedDate
   setSaveState(current=>({...current,[metric]:'Saving…'}))
@@ -484,22 +492,29 @@ export default function Page(){
   requestAnimationFrame(()=>document.getElementById('one-off-entry')?.scrollIntoView({behavior:'smooth',block:'center'}))
  }
 
- function incrementWater(amount:number){
+ function queueWaterSave(logDate:string,value:number|null){
   if(!session)return
+  const userId=session.user.id
+  if(selectedDateRef.current===logDate)setSaveState(current=>({...current,water_oz:'Saving…'}))
+  void waterSaveQueue.enqueue(async()=>{
+   const saved=await saveDailyMetricField(supabase,userId,logDate,'water_oz',value)
+   if(selectedDateRef.current===logDate&&waterValueRef.current===value){
+    setMetrics(current=>({...current,id:saved.id,water_oz:saved.water_oz}))
+    setSaveState(current=>({...current,water_oz:'Saved'}))
+   }
+  }).catch(error=>{
+   if(selectedDateRef.current===logDate&&waterValueRef.current===value){
+    setSaveState(current=>({...current,water_oz:errorText(error)}))
+   }
+  })
+ }
+
+ function incrementWater(amount:number){
   const logDate=selectedDate
   const next=incrementMetricValue(waterValueRef.current,amount)
   waterValueRef.current=next
   setMetrics(current=>({...current,water_oz:next}))
-  setSaveState(current=>({...current,water_oz:'Saving…'}))
-  waterSaveQueue.current=waterSaveQueue.current.then(async()=>{
-   const saved=await saveDailyMetricField(supabase,session.user.id,logDate,'water_oz',next)
-   if(selectedDateRef.current===logDate){
-    setMetrics(current=>({...current,id:saved.id}))
-    setSaveState(current=>({...current,water_oz:'Saved'}))
-   }
-  }).catch(error=>{
-   if(selectedDateRef.current===logDate)setSaveState(current=>({...current,water_oz:errorText(error)}))
-  })
+  queueWaterSave(logDate,next)
  }
 
  async function addMeal(event:FormEvent){
@@ -657,6 +672,9 @@ export default function Page(){
   }
   if(nextTarget.effective_from<=selectedDate&&(nextTarget.effective_to===null||selectedDate<nextTarget.effective_to)){
    setSelectedTarget(nextTarget)
+  }
+  if(trackingView!=='day'&&session){
+   void refreshPeriod(trackingView,periodAnchor,session.user.id,nextGoal.id)
   }
   setSettingsOpen(false)
  }
@@ -817,7 +835,7 @@ export default function Page(){
   </section>
 
   <section className="softGrid">
-   <label className="softCard waterCard"><span>Water <small>Goal · {formatTarget(targetForDay?.water_target_oz)} oz/day</small></span><div><input type="number" value={metrics.water_oz??''} placeholder="0" onChange={event=>metricNumber('water_oz',event.target.value)} onBlur={()=>autosaveMetric('water_oz',metrics.water_oz)} onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur()}}/><b>/ {formatTarget(targetForDay?.water_target_oz)} oz</b></div><span className="waterIncrements">{[8,12,16,24].map(amount=><button type="button" key={amount} onClick={()=>incrementWater(amount)}>+{amount} oz</button>)}</span>{saveState.water_oz&&<em className="fieldSaveState">{saveState.water_oz}</em>}</label>
+   <label className="softCard waterCard"><span>Water <small>Goal · {formatTarget(targetForDay?.water_target_oz)} oz/day</small></span><div><input type="number" value={metrics.water_oz??''} placeholder="0" onChange={event=>metricNumber('water_oz',event.target.value)} onBlur={()=>queueWaterSave(selectedDate,metrics.water_oz)} onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur()}}/><b>/ {formatTarget(targetForDay?.water_target_oz)} oz</b></div><span className="waterIncrements">{[8,12,16,24].map(amount=><button type="button" key={amount} onClick={()=>incrementWater(amount)}>+{amount} oz</button>)}</span>{saveState.water_oz&&<em className="fieldSaveState">{saveState.water_oz}</em>}</label>
    <article className="softCard nutritionSoft"><span>Carbs <small>{targetForDay?.carb_target_g===null?'No fixed target':targetForDay?`Goal · ${formatTarget(targetForDay.carb_target_g)}g`:'Loading target'}</small></span><div><strong>{nutritionLoading?'—':formatNumber(totals.carbs_g)}</strong><b>g</b>{totals.carbs_unknown_count>0&&<em>partial</em>}</div></article>
   </section>
 

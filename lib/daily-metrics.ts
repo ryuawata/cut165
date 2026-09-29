@@ -12,6 +12,17 @@ export type DailyMetrics=Omit<DailyMetricsProjection,'id'>&{id:string|null}
 export type DailyMetricDeltaKey='steps'|'water_oz'
 export type AutosaveDailyMetricKey='steps'|'water_oz'|'notes'
 
+export function createSerializedSaveQueue(){
+ let queue=Promise.resolve()
+ return {
+  enqueue(save:()=>Promise<void>){
+   const result=queue.then(save)
+   queue=result.catch(()=>undefined)
+   return result
+  }
+ }
+}
+
 export function emptyDailyMetrics(logDate:string):DailyMetrics{
  return {id:null,log_date:logDate,steps:null,water_oz:null,cardio_minutes:null,notes:null}
 }

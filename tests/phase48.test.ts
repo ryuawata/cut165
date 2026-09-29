@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 import test from 'node:test'
-import {incrementMetricValue} from '../lib/daily-metrics.ts'
+import {createSerializedSaveQueue,incrementMetricValue} from '../lib/daily-metrics.ts'
 import {
  completeCustomWorkout,createCustomWorkoutTemplate,customWorkoutCode,deleteCustomWorkoutTemplate,
  getCustomWorkoutTemplates,snapshotCustomWorkout,updateCustomWorkoutTemplate,validateCustomWorkout,
@@ -11,7 +11,7 @@ import {
  createNutritionEntry,normalizeManualNutritionValues,normalizeMealSlot
 } from '../lib/nutrition.ts'
 import {
- canNavigateToPeriod,chartPositions,monthBoundsForDate,summarizePeriod,targetForDate,
+ canNavigateToPeriod,chartPositions,completeNutritionDays,monthBoundsForDate,summarizePeriod,targetForDate,
  weekBoundsForDate,type PeriodProgress
 } from '../lib/progress.ts'
 import {
@@ -71,11 +71,37 @@ test('manual inserts normalize blanks while imported historical unknowns stay nu
  )
 })
 
-test('water increment math starts at zero and preserves rapid sequential additions',()=>{
- let water:number|null=null
- for(const amount of [8,12,16,24])water=incrementMetricValue(water,amount)
- assert.equal(water,60)
- assert.throws(()=>incrementMetricValue(water,-8),/greater than zero/)
+test('one serialized Water queue preserves manual edits and rapid increments',async()=>{
+ async function run(initial:number|null,actions:Array<{type:'edit';value:number}|{type:'add';value:number}>){
+  const queue=createSerializedSaveQueue()
+  const writes:number[]=[]
+  const pending:Promise<void>[]=[]
+  let logical=initial
+  for(const action of actions){
+   logical=action.type==='edit'?action.value:incrementMetricValue(logical,action.value)
+   const value=logical
+   pending.push(queue.enqueue(async()=>{writes.push(value)}))
+  }
+  await Promise.all(pending)
+  return {logical,persisted:writes.at(-1)??initial,writes}
+ }
+ assert.equal((await run(null,[{type:'add',value:8}])).persisted,8)
+ assert.equal((await run(40,[{type:'add',value:8}])).persisted,48)
+ assert.deepEqual(await run(null,[{type:'edit',value:40},{type:'add',value:8}]),{
+  logical:48,persisted:48,writes:[40,48]
+ })
+ assert.equal((await run(null,[{type:'add',value:8},{type:'add',value:12},{type:'add',value:16}])).persisted,36)
+ const serial=createSerializedSaveQueue()
+ const started:number[]=[]
+ let releaseFirst:()=>void=()=>undefined
+ const first=serial.enqueue(()=>new Promise<void>(resolve=>{started.push(40);releaseFirst=resolve}))
+ const second=serial.enqueue(async()=>{started.push(48)})
+ await Promise.resolve()
+ assert.deepEqual(started,[40])
+ releaseFirst()
+ await Promise.all([first,second])
+ assert.deepEqual(started,[40,48])
+ assert.throws(()=>incrementMetricValue(40,-8),/greater than zero/)
 })
 
 test('calendar periods use Monday boundaries, month boundaries, and block future periods',()=>{
@@ -87,7 +113,7 @@ test('calendar periods use Monday boundaries, month boundaries, and block future
  assert.equal(calendarDateInTimezone('America/Chicago',new Date('2026-09-29T03:30:00Z')),'2026-09-28')
 })
 
-test('period summaries exclude missing days, preserve logged zeros, and resolve effective targets',()=>{
+test('period summaries exclude only the affected partial metric and use matching target dates',()=>{
  const targets=[
   {effective_from:'2026-09-01',effective_to:'2026-09-16',calorie_target_min:1600,calorie_target_max:1800,protein_target_g:140},
   {effective_from:'2026-09-16',effective_to:null,calorie_target_min:1800,calorie_target_max:2000,protein_target_g:150}
@@ -95,8 +121,9 @@ test('period summaries exclude missing days, preserve logged zeros, and resolve 
  const progress={
   bounds:{start:'2026-09-14',endExclusive:'2026-09-21'},weights:[],
   nutrition:[
-   {log_date:'2026-09-15',entry_count:1,calories:0,protein_g:0},
-   {log_date:'2026-09-16',entry_count:1,calories:1000,protein_g:100}
+   {log_date:'2026-09-15',entry_count:1,calories:100,protein_g:20,calories_unknown_count:0,protein_unknown_count:1},
+   {log_date:'2026-09-16',entry_count:1,calories:200,protein_g:40,calories_unknown_count:1,protein_unknown_count:0},
+   {log_date:'2026-09-17',entry_count:1,calories:300,protein_g:60,calories_unknown_count:0,protein_unknown_count:0}
   ],
   metrics:[{log_date:'2026-09-15',steps:0},{log_date:'2026-09-16',steps:null}],
   workouts:[
@@ -105,29 +132,50 @@ test('period summaries exclude missing days, preserve logged zeros, and resolve 
   ],targets
  } as unknown as PeriodProgress
  const summary=summarizePeriod(progress)
- assert.equal(summary.averageCalories,500)
+ assert.equal(summary.averageCalories,200)
  assert.equal(summary.averageProtein,50)
- assert.equal(summary.nutritionLoggedDays,2)
+ assert.equal(summary.nutritionLoggedDays,3)
+ assert.equal(summary.completeCalorieDays,2)
+ assert.equal(summary.completeProteinDays,2)
+ assert.deepEqual(completeNutritionDays(progress.nutrition,'calories').map(day=>day.log_date),['2026-09-15','2026-09-17'])
+ assert.deepEqual(completeNutritionDays(progress.nutrition,'protein_g').map(day=>day.log_date),['2026-09-16','2026-09-17'])
  assert.equal(summary.averageSteps,0)
  assert.equal(summary.stepsLoggedDays,1)
  assert.equal(summary.completedWorkouts,2)
  assert.equal(summary.completedStrength,1)
  assert.equal(summary.averageCalorieTarget,1800)
- assert.equal(summary.averageProteinTarget,145)
+ assert.equal(summary.averageProteinTarget,150)
  assert.equal(targetForDate(progress.targets,'2026-09-15')?.protein_target_g,140)
  assert.equal(targetForDate(progress.targets,'2026-09-16')?.protein_target_g,150)
 })
 
-test('chart geometry handles empty, one-point, and sparse series without inventing zeroes',()=>{
- assert.deepEqual(chartPositions([]),[])
- assert.deepEqual(chartPositions([{date:'2026-09-15',value:175}],100,60,10),[
-  {date:'2026-09-15',value:175,x:50,y:50}
- ])
- const sparse=chartPositions([
-  {date:'2026-09-01',value:10},{date:'2026-09-20',value:30}
- ],100,60,10)
- assert.deepEqual(sparse.map(point=>point.x),[10,90])
- assert.deepEqual(sparse.map(point=>point.value),[10,30])
+test('a complete logged zero remains a valid nutrition sample',()=>{
+ const zeroDay={
+  log_date:'2026-09-18',entry_count:1,calories:0,protein_g:0,
+  calories_unknown_count:0,protein_unknown_count:0
+ } as PeriodProgress['nutrition'][number]
+ assert.deepEqual(completeNutritionDays([zeroDay],'calories'),[zeroDay])
+ assert.deepEqual(completeNutritionDays([zeroDay],'protein_g'),[zeroDay])
+})
+
+test('chart geometry uses real calendar spacing and remains safe for empty and one-point data',()=>{
+ const september={start:'2026-09-01',endExclusive:'2026-10-01'}
+ assert.deepEqual(chartPositions([],september),[])
+ const one=chartPositions([{date:'2026-09-15',value:175}],september,100,60,10)
+ assert.equal(one[0].y,30)
+ assert.ok(one[0].x>45&&one[0].x<52)
+ const adjacent=chartPositions([
+  {date:'2026-09-01',value:10},{date:'2026-09-02',value:30}
+ ],september,100,60,10)
+ assert.ok(adjacent[1].x-adjacent[0].x<3)
+ const monthSpan=chartPositions([
+  {date:'2026-09-01',value:10},{date:'2026-09-30',value:30}
+ ],september,100,60,10)
+ assert.deepEqual(monthSpan.map(point=>point.x),[10,90])
+ const sparseWeek=chartPositions([
+  {date:'2026-09-28',value:10},{date:'2026-10-02',value:30}
+ ],{start:'2026-09-28',endExclusive:'2026-10-05'},100,60,10)
+ assert.deepEqual(sparseWeek.map(point=>Math.round(point.x)),[10,63])
 })
 
 test('custom workout validation supports both formats and all categories safely',()=>{
@@ -241,6 +289,17 @@ test('Phase 4.8 UI exposes units, entry parity, one shared form, and water contr
  assert.match(page,/\+ Add entry/)
  assert.equal(page.match(/id="one-off-entry"/g)?.length,1)
  for(const amount of [8,12,16,24])assert.match(page,new RegExp(`\\+\\{amount\\} oz|\\+${amount} oz`))
+})
+
+test('Water input and Quick Adds share one queue, and Goal Settings refreshes visible periods',()=>{
+ const page=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8')
+ assert.match(page,/function queueWaterSave\(logDate:string,value:number\|null\)/)
+ assert.match(page,/onBlur=\{\(\)=>queueWaterSave\(selectedDate,metrics\.water_oz\)\}/)
+ assert.match(page,/function incrementWater[\s\S]*queueWaterSave\(logDate,next\)/)
+ assert.doesNotMatch(page,/autosaveMetric\('water_oz'/)
+ assert.match(page,/const refreshPeriod=useCallback/)
+ assert.match(page,/function finishGoalSettings[\s\S]*trackingView!==['"]day['"][\s\S]*refreshPeriod\(trackingView,periodAnchor,session\.user\.id,nextGoal\.id\)/)
+ assert.equal(page.match(/getPeriodProgress\(supabase/g)?.length,1)
 })
 
 test('Phase 4.8 migration is additive, preserves history, and secures custom templates',()=>{
