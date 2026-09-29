@@ -2,11 +2,10 @@
 import {FormEvent,useCallback,useEffect,useMemo,useRef,useState} from 'react'
 import type {Session} from '@supabase/supabase-js'
 import Onboarding,{type AccountSetup} from './onboarding'
-import GoalSettings from './goal-settings'
+import GoalSettings,{type SettingsSection} from './goal-settings'
 import NutritionPresets from './nutrition-presets'
-import WorkoutTemplateEditor from './workout-template-editor'
-import CustomWorkouts from './custom-workouts'
-import PeriodProgressView from './period-progress'
+import CustomWorkoutLauncher from './custom-workout-launcher'
+import PeriodProgressView,{PeriodSharedProgressView} from './period-progress'
 import {supabase} from '../lib/supabase'
 import {
  createSerializedSaveQueue,emptyDailyMetrics,getDailyMetrics,incrementMetricValue,saveDailyMetricField,
@@ -39,12 +38,17 @@ import {
  type WorkoutTemplate
 } from '../lib/workout-templates'
 import {
+ getCompletedCustomWorkoutsForDate,getCustomWorkoutTemplates,
+ type CustomWorkoutTemplate
+} from '../lib/custom-workouts'
+import {
  canNavigateToPeriod,getPeriodProgress,periodBounds,shiftPeriodAnchor,
  type PeriodProgress,type TrackingView
 } from '../lib/progress'
 
 type MealDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string;fat_g:string;alcohol_servings:string}
 type EditDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string;fat_g:string;alcohol_servings:string}
+type DashboardDomain='nutrition'|'training'
 
 const localISO=(date=new Date())=>{
  const year=date.getFullYear()
@@ -115,6 +119,7 @@ export default function Page(){
  const [selectedTarget,setSelectedTarget]=useState<GoalTarget|null>(null)
  const [targetLoading,setTargetLoading]=useState(false)
  const [settingsOpen,setSettingsOpen]=useState(false)
+ const [settingsSection,setSettingsSection]=useState<SettingsSection>('goal')
  const [email,setEmail]=useState('')
  const [password,setPassword]=useState('')
  const [msg,setMsg]=useState('')
@@ -126,6 +131,7 @@ export default function Page(){
  const [waterSaveQueue]=useState(createSerializedSaveQueue)
  const waterValueRef=useRef<number|null>(null)
  const [trackingView,setTrackingView]=useState<TrackingView>('day')
+ const [dashboardDomain,setDashboardDomain]=useState<DashboardDomain>('nutrition')
  const [periodAnchor,setPeriodAnchor]=useState(localISO())
  const [periodData,setPeriodData]=useState<PeriodProgress|null>(null)
  const [periodLoading,setPeriodLoading]=useState(false)
@@ -143,6 +149,8 @@ export default function Page(){
  const [workoutTemplates,setWorkoutTemplates]=useState<WorkoutTemplate[]>(()=>[
   defaultWorkoutTemplate('full_body_a'),defaultWorkoutTemplate('full_body_b'),defaultWorkoutTemplate('full_body_c')
  ])
+ const [customWorkoutTemplates,setCustomWorkoutTemplates]=useState<CustomWorkoutTemplate[]>([])
+ const [completedCustomWorkoutIds,setCompletedCustomWorkoutIds]=useState<Set<string>>(new Set())
  const [workoutBusy,setWorkoutBusy]=useState(false)
  const [entries,setEntries]=useState<NutritionEntry[]>([])
  const [totals,setTotals]=useState<DailyNutritionTotals>(()=>emptyDailyNutritionTotals(localISO()))
@@ -215,7 +223,11 @@ export default function Page(){
  },[trackingView,periodAnchor,session?.user.id,activeGoal?.id,bootstrapStatus,refreshPeriod])
  useEffect(()=>{
   if(!session||bootstrapStatus!=='dashboard-ready')return
-  void getWorkoutTemplates(supabase,session.user.id).then(setWorkoutTemplates).catch(error=>setMsg(errorText(error)))
+  void Promise.all([
+   getWorkoutTemplates(supabase,session.user.id),getCustomWorkoutTemplates(supabase,session.user.id)
+  ]).then(([programTemplates,customTemplates])=>{
+   setWorkoutTemplates(programTemplates);setCustomWorkoutTemplates(customTemplates)
+  }).catch(error=>setMsg(errorText(error)))
  },[session?.user.id,bootstrapStatus])
 
  async function loadAccount(accountSession:Session){
@@ -304,6 +316,7 @@ export default function Page(){
   setWeightLbs(null)
   setWorkoutPlan(emptyWorkoutPlan(logDate))
   setWorkoutFacts(null)
+  setCompletedCustomWorkoutIds(new Set())
   setTargetLoading(true)
   setEntries([])
   setTotals(emptyDailyNutritionTotals(logDate))
@@ -317,6 +330,7 @@ export default function Page(){
    getNutritionEntries(supabase,session.user.id,logDate),
    getDailyNutritionTotals(supabase,session.user.id,logDate),
    getWorkoutPlan(supabase,session.user.id,logDate),
+   getCompletedCustomWorkoutsForDate(supabase,session.user.id,logDate),
    activeGoal?getEffectiveGoalTarget(supabase,session.user.id,activeGoal.id,logDate):Promise.resolve(null),
    coachingWeek
     ?getWorkoutCoachingFacts(
@@ -329,7 +343,7 @@ export default function Page(){
     :Promise.resolve(null)
   ])
   if(sequence!==loadSequence.current||selectedDateRef.current!==logDate)return
-  const [metricsResult,measurementResult,entriesResult,totalsResult,workoutResult,targetResult,coachingResult]=results
+  const [metricsResult,measurementResult,entriesResult,totalsResult,workoutResult,customWorkoutsResult,targetResult,coachingResult]=results
   if(metricsResult.status==='fulfilled')setMetrics(metricsResult.value)
   else setMsg(errorText(metricsResult.reason))
   if(measurementResult.status==='fulfilled'){
@@ -342,6 +356,8 @@ export default function Page(){
   else setNutritionError(errorText(totalsResult.reason))
   if(workoutResult.status==='fulfilled')setWorkoutPlan(workoutResult.value)
   else setMsg(errorText(workoutResult.reason))
+  if(customWorkoutsResult.status==='fulfilled')setCompletedCustomWorkoutIds(new Set(customWorkoutsResult.value.flatMap(workout=>workout.custom_workout_template_id?[workout.custom_workout_template_id]:[])))
+  else setMsg(errorText(customWorkoutsResult.reason))
   if(targetResult.status==='fulfilled')setSelectedTarget(targetResult.value)
   else setMsg(errorText(targetResult.reason))
   if(coachingResult.status==='fulfilled'){
@@ -465,6 +481,7 @@ export default function Page(){
    setWeightLbs(null)
    setWorkoutPlan(emptyWorkoutPlan(next))
    setWorkoutFacts(null)
+   setCompletedCustomWorkoutIds(new Set())
    setSelectedTarget(null)
    setTargetLoading(true)
    setEntries([])
@@ -485,6 +502,16 @@ export default function Page(){
  function openDateFromPeriod(logDate:string){
   setTrackingView('day')
   selectDate(logDate)
+ }
+
+ function openSettings(section:SettingsSection='goal'){
+  setSettingsSection(section)
+  setSettingsOpen(true)
+ }
+
+ async function finishCustomWorkout(templateId:string){
+  setCompletedCustomWorkoutIds(current=>new Set(current).add(templateId))
+  await loadSelected(selectedDate,false)
  }
 
  function openMealForm(){
@@ -732,20 +759,15 @@ export default function Page(){
  return <main className="app">
   <nav>
    <div><div className="brand">{goalIdentity(activeGoal.target_weight_lbs)}</div><small className="productMark">CUT365</small></div>
-   <div className="navRight"><button onClick={()=>setSettingsOpen(true)}>Settings</button><button onClick={()=>supabase.auth.signOut()}>Sign out</button></div>
+   <div className="navRight"><button onClick={()=>openSettings()}>Settings</button><button onClick={()=>supabase.auth.signOut()}>Sign out</button></div>
   </nav>
 
   {settingsOpen&&<GoalSettings
    session={session} profile={profile} goal={activeGoal} target={currentTarget} currentWeightLbs={latest}
+   initialSection={settingsSection} workoutTemplates={workoutTemplates} customWorkoutTemplates={customWorkoutTemplates}
    onClose={()=>setSettingsOpen(false)} onGoalSaved={finishGoalSettings} onProfileSaved={finishProfileSettings}
+   onWorkoutTemplatesChange={setWorkoutTemplates} onCustomWorkoutTemplatesChange={setCustomWorkoutTemplates}
   />}
-
-  <div className="trackingViewTabs" role="tablist" aria-label="Tracking view">
-   {(['day','week','month'] as const).map(view=><button type="button" role="tab" aria-selected={trackingView===view} className={trackingView===view?'active':''} key={view} onClick={()=>{
-    setTrackingView(view)
-    if(view!=='day')setPeriodAnchor(selectedDate)
-   }}>{view[0].toUpperCase()+view.slice(1)}</button>)}
-  </div>
 
   {trackingView==='day'?<>
   <div className="dateNavRow">
@@ -758,47 +780,34 @@ export default function Page(){
   </div>
   {isToday&&hourInTimezone(profile.timezone)<4&&<button className="yesterdayShortcut" onClick={()=>changeDate(-1)}>Still logging yesterday?</button>}
 
+  <div className="trackingViewTabs" role="tablist" aria-label="Tracking view">
+   {(['day','week','month'] as const).map(view=><button type="button" role="tab" aria-selected={trackingView===view} className={trackingView===view?'active':''} key={view} onClick={()=>{
+    setTrackingView(view)
+    if(view!=='day')setPeriodAnchor(selectedDate)
+   }}>{view[0].toUpperCase()+view.slice(1)}</button>)}
+  </div>
+
   {isToday&&currentTarget.source==='onboarding'&&!profile.getting_started_dismissed&&
    <aside className="gettingStarted">
     <div className="gettingStartedHead"><strong>Start your first day</strong><button onClick={dismissFirstDay} aria-label="Dismiss getting started">×</button></div>
     <p>Log a meal · Add your weight · Add your steps</p>
    </aside>}
 
-  <section className="trainingWrap">
-   <p className="eyebrow">{isToday?"TODAY'S TRAINING":"PRESCRIBED TRAINING"}</p>
-   {strengthSuppressed?<div className="trainingRestState"><strong>{workoutFacts?'No strength workout today':'Checking today’s training…'}</strong><span>{workoutFacts?`Next CUT365 workout: ${workoutName(nextWorkout)}`:'Reviewing completed workouts'}</span></div>:<details className="trainingCard">
-    <summary>
-     <span className="trainingTitle"><strong>{training.name}</strong><small>{training.type} <i>·</i> {training.duration}</small></span>
-     <span className="trainingToggle" aria-hidden="true">+</span>
-    </summary>
-    <div className="trainingBody">
-     {training.kind==='strength'&&<div className="exerciseList">
-      <p className="trainingFocus">{training.focus}</p>
-      <div className="exerciseHead"><span>Exercise</span><span>Sets</span><span>Reps</span></div>
-      {training.exercises.map(([exercise,sets,reps])=><div className="exerciseRow" key={exercise}>
-       <strong>{exercise}</strong><span>{sets}</span><span>{reps}</span>
-      </div>)}
-     </div>}
-     {training.kind==='recovery'&&<div className="trainingNote"><strong>Goal: {formatTarget(targetForDay?.steps_target,0)}+ steps</strong><p>Recovery and everyday movement.</p></div>}
-     {training.kind==='legacy'&&<div className="trainingNote"><strong>Historical strength session</strong><p>Exercise details were not recorded in the original CUT165 log.</p></div>}
-     {training.kind==='custom'&&<div className="trainingNote"><strong>Custom workout session</strong><p>This workout remains in your training history.</p></div>}
-     {workoutPlan.code==='legacy_strength'
-      ?<div className={`completeWorkout readOnly ${workoutPlan.completed?'done':''}`} role="status"><span>{workoutPlan.completed?'Historical workout complete':'Historical workout record'}</span><b>{workoutPlan.completed?'✓':'·'}</b></div>
-      :<button className={`completeWorkout ${workoutPlan.completed?'done':''}`} onClick={toggleWorkout} disabled={workoutBusy}>
-       <span>{workoutBusy?'Updating…':workoutPlan.completed?'Workout complete':'Mark workout complete'}</span><b>{workoutPlan.completed?'✓':'○'}</b>
-      </button>}
-    </div>
-   </details>}
-   <WorkoutTemplateEditor userId={session.user.id} templates={workoutTemplates} onChange={setWorkoutTemplates}/>
-  </section>
-
-  <CustomWorkouts userId={session.user.id} logDate={selectedDate} isToday={isToday} onCompleted={()=>loadSelected(selectedDate,false)}/>
-
   <section className={`goalCard p${Math.min(4,Math.floor(progress/25)+1)}`}>
    <div><p className="eyebrow">PROGRESS TO YOUR GOAL{activeGoal.target_date?` · ${localDate(activeGoal.target_date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}`:''}</p><div className="weightLine"><strong>{formatWeightValue(displayedLatest)}</strong><span>{weightUnit}</span><i>→</i><b>{formatWeightValue(displayedTarget)}</b><span>{weightUnit}</span></div></div>
    <div className="goalMeta">{changeLabel==='No change'?<><strong>No change</strong><span>from start</span></>:<><strong>{displayedChange.toFixed(1)} {weightUnit}</strong><span>{changeLabel}</span></>}<strong>{progress.toFixed(0)}%</strong><span>complete</span></div>
    <div className="bar"><i style={{width:`${progress}%`}}/></div>
   </section>
+
+  <section className="sharedWeight">
+   <Metric kind="weight" icon="●" label="Weight" value={displayWeight(weightLbs,weightUnit)} unit={weightUnit} target={`Destination · ${formatWeightValue(displayedTarget)} ${weightUnit}`} step=".1" saveState={saveState.weight} onChange={value=>setWeightLbs(value===''?null:storedWeight(Number(value),weightUnit))} onSave={autosaveWeight}/>
+  </section>
+
+  <div className="domainTabs" role="tablist" aria-label="Dashboard domain">
+   {(['nutrition','training'] as const).map(domain=><button type="button" role="tab" aria-selected={dashboardDomain===domain} className={dashboardDomain===domain?'active':''} key={domain} onClick={()=>setDashboardDomain(domain)}>{domain[0].toUpperCase()+domain.slice(1)}</button>)}
+  </div>
+
+  {dashboardDomain==='nutrition'?<>
 
   <div className="sectionHead">
    <div><p className="eyebrow">DAILY SIGNALS</p><h2>{isToday?'Today':selectedLabel}</h2></div>
@@ -830,8 +839,6 @@ export default function Page(){
   <section className="metrics">
    <NutritionMetric kind="calories" icon="◒" label="Calories" value={totals.calories} unit="kcal" target={`Goal · ${targetForDay?formatTarget(primaryCalorieTarget(targetForDay.calorie_target_min,targetForDay.calorie_target_max),0):'—'} kcal`} partial={totals.calories_unknown_count>0} loading={nutritionLoading} saveState={saveState.calories} onSave={value=>replaceTotal('calories',value)}/>
    <NutritionMetric kind="protein" icon="◆" label="Protein" value={totals.protein_g} unit="g" target={`Goal · ${formatTarget(targetForDay?.protein_target_g)}+`} partial={totals.protein_unknown_count>0} loading={nutritionLoading} saveState={saveState.protein_g} onSave={value=>replaceTotal('protein_g',value)}/>
-   <Metric kind="steps" icon="↗" label="Steps" value={metrics.steps} unit="" target={`Goal · ${formatTarget(targetForDay?.steps_target,0)}+`} saveState={saveState.steps} onChange={value=>metricNumber('steps',value)} onSave={()=>autosaveMetric('steps',metrics.steps)}/>
-   <Metric kind="weight" icon="●" label="Weight" value={displayWeight(weightLbs,weightUnit)} unit={weightUnit} target={`Destination · ${formatWeightValue(displayedTarget)} ${weightUnit}`} step=".1" saveState={saveState.weight} onChange={value=>setWeightLbs(value===''?null:storedWeight(Number(value),weightUnit))} onSave={autosaveWeight}/>
   </section>
 
   <section className="softGrid">
@@ -857,16 +864,53 @@ export default function Page(){
 
   <label className="notes"><span>Notes {saveState.notes&&<small>{saveState.notes}</small>}</span><textarea placeholder="Dinner out, hunger, workout, anything useful..." value={metrics.notes||''} onChange={event=>setMetrics(current=>({...current,notes:event.target.value}))} onBlur={()=>autosaveMetric('notes',metrics.notes)}/></label>
   </>:<>
+   <section className="trainingWrap">
+    <p className="eyebrow">{isToday?"TODAY'S TRAINING":"PRESCRIBED TRAINING"}</p>
+    {strengthSuppressed?<div className="trainingRestState"><strong>{workoutFacts?'No strength workout today':'Checking today’s training…'}</strong><span>{workoutFacts?`Next CUT365 workout: ${workoutName(nextWorkout)}`:'Reviewing completed workouts'}</span></div>:<article className="trainingCard expandedTrainingCard">
+     <header>
+      <span className="trainingTitle"><strong>{training.name}</strong><small>{training.type} <i>·</i> {training.duration}</small></span>
+     </header>
+     <div className="trainingBody">
+      {training.kind==='strength'&&<div className="exerciseList">
+       <p className="trainingFocus">{training.focus}</p>
+       <div className="exerciseHead"><span>Exercise</span><span>Sets</span><span>Reps</span></div>
+       {training.exercises.map(([exercise,sets,reps])=><div className="exerciseRow" key={exercise}><strong>{exercise}</strong><span>{sets}</span><span>{reps}</span></div>)}
+      </div>}
+      {training.kind==='recovery'&&<div className="trainingNote"><strong>Goal: {formatTarget(targetForDay?.steps_target,0)}+ steps</strong><p>Recovery and everyday movement.</p></div>}
+      {training.kind==='legacy'&&<div className="trainingNote"><strong>Historical strength session</strong><p>Exercise details were not recorded in the original CUT165 log.</p></div>}
+      {training.kind==='custom'&&<div className="trainingNote"><strong>Custom workout session</strong><p>This workout remains in your training history.</p></div>}
+      {workoutPlan.code==='legacy_strength'
+       ?<div className={`completeWorkout readOnly ${workoutPlan.completed?'done':''}`} role="status"><span>{workoutPlan.completed?'Historical workout complete':'Historical workout record'}</span><b>{workoutPlan.completed?'✓':'·'}</b></div>
+       :<button className={`completeWorkout ${workoutPlan.completed?'done':''}`} onClick={toggleWorkout} disabled={workoutBusy}><span>{workoutBusy?'Updating…':workoutPlan.completed?'Workout complete':'Mark workout complete'}</span><b>{workoutPlan.completed?'✓':'○'}</b></button>}
+     </div>
+    </article>}
+   </section>
+   <section className="trainingMetrics"><Metric kind="steps" icon="↗" label="Steps" value={metrics.steps} unit="" target={`Goal · ${formatTarget(targetForDay?.steps_target,0)}+`} saveState={saveState.steps} onChange={value=>metricNumber('steps',value)} onSave={()=>autosaveMetric('steps',metrics.steps)}/></section>
+   <CustomWorkoutLauncher userId={session.user.id} logDate={selectedDate} isToday={isToday} templates={customWorkoutTemplates} completedIds={completedCustomWorkoutIds} onCompleted={finishCustomWorkout} onManage={()=>openSettings('workouts')}/>
+  </>}
+  </>:<>
    <div className="dateNavRow periodNavRow">
     <div className="dateNav" aria-label={`Select ${trackingView}`}>
      <button onClick={()=>changePeriod(-1)} aria-label={`Previous ${trackingView}`}>‹</button>
      <strong>{periodBounds(trackingView,periodAnchor).start.toUpperCase()} <i>·</i> {trackingView.toUpperCase()}</strong>
      <button onClick={()=>changePeriod(1)} disabled={!canNavigateToPeriod(trackingView,shiftPeriodAnchor(trackingView,periodAnchor,1),today)} aria-label={`Next ${trackingView}`}>›</button>
-    </div>
-    {periodBounds(trackingView,periodAnchor).start!==periodBounds(trackingView,today).start&&<button className="todayButton" onClick={()=>setPeriodAnchor(today)}>Current</button>}
+   </div>
+   {periodBounds(trackingView,periodAnchor).start!==periodBounds(trackingView,today).start&&<button className="todayButton" onClick={()=>setPeriodAnchor(today)}>Current</button>}
+  </div>
+   <div className="trackingViewTabs" role="tablist" aria-label="Tracking view">
+    {(['day','week','month'] as const).map(view=><button type="button" role="tab" aria-selected={trackingView===view} className={trackingView===view?'active':''} key={view} onClick={()=>{
+     setTrackingView(view)
+     if(view==='day')selectDate(periodAnchor)
+    }}>{view[0].toUpperCase()+view.slice(1)}</button>)}
    </div>
    {periodLoading&&<p className="periodLoading">Loading progress…</p>}
-   {!periodLoading&&periodData&&<PeriodProgressView view={trackingView} data={periodData} weightUnit={weightUnit} onDate={openDateFromPeriod}/>}
+   {!periodLoading&&periodData&&<>
+    <PeriodSharedProgressView view={trackingView} data={periodData} weightUnit={weightUnit} onDate={openDateFromPeriod}/>
+    <div className="domainTabs" role="tablist" aria-label="Dashboard domain">
+     {(['nutrition','training'] as const).map(domain=><button type="button" role="tab" aria-selected={dashboardDomain===domain} className={dashboardDomain===domain?'active':''} key={domain} onClick={()=>setDashboardDomain(domain)}>{domain[0].toUpperCase()+domain.slice(1)}</button>)}
+    </div>
+    <PeriodProgressView domain={dashboardDomain} data={periodData} onDate={openDateFromPeriod}/>
+   </>}
   </>}
  </main>
 }

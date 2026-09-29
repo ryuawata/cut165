@@ -22,38 +22,49 @@ function MiniChart({label,points,bounds,color,onDate}:{label:string;points:Chart
  </article>
 }
 
-export default function PeriodProgressView({view,data,weightUnit,onDate}:{
- view:Exclude<TrackingView,'day'>;data:PeriodProgress;weightUnit:'lb'|'kg';onDate:(date:string)=>void
-}){
+type PeriodProps={view:Exclude<TrackingView,'day'>;data:PeriodProgress;weightUnit:'lb'|'kg';onDate:(date:string)=>void}
+
+export function PeriodSharedProgressView({view,data,weightUnit,onDate}:PeriodProps){
  const summary=useMemo(()=>summarizePeriod(data),[data])
  const weight=(pounds:number)=>weightUnit==='kg'?poundsToKilograms(pounds):pounds
  const weightPoints=data.weights.map(item=>({date:item.log_date,value:weight(item.weight_lbs)}))
- const caloriePoints=completeNutritionDays(data.nutrition,'calories').map(item=>({date:item.log_date,value:item.calories!}))
- const proteinPoints=completeNutritionDays(data.nutrition,'protein_g').map(item=>({date:item.log_date,value:item.protein_g!}))
- const stepPoints=data.metrics.filter(item=>item.steps!==null).map(item=>({date:item.log_date,value:item.steps!}))
- const workoutByDate=new Map<string,number>()
- for(const workout of data.workouts.filter(item=>item.status==='completed'))workoutByDate.set(workout.scheduled_date,(workoutByDate.get(workout.scheduled_date)??0)+1)
- const workoutPoints=[...workoutByDate].map(([date,value])=>({date,value})).sort((a,b)=>a.date.localeCompare(b.date))
  const first=summary.firstWeight===null?null:weight(summary.firstWeight)
  const latest=summary.latestWeight===null?null:weight(summary.latestWeight)
  const change=summary.weightChange===null?null:weight(summary.weightChange)
  const title=view==='week'?'Weekly progress':'Monthly progress'
  return <section className="periodProgress">
   <div className="sectionHead"><div><p className="eyebrow">{view.toUpperCase()} VIEW</p><h2>{title}</h2></div><span>Read only</span></div>
-  <div className="periodSummaryGrid">
+  <div className="periodSummaryGrid periodSharedSummary">
    <article><span>Weight trend</span><strong>{first===null?'—':number(first,1)} → {latest===null?'—':number(latest,1)} {weightUnit}</strong><small>{change===null?'Need 2 logged weights':`${change>0?'+':''}${number(change,1)} ${weightUnit} · ${summary.weightSampleCount} samples`}</small></article>
-   <article><span>Calories</span><strong>{number(summary.averageCalories)} kcal</strong><small>Avg target {number(summary.averageCalorieTarget)} · {summary.completeCalorieDays} complete · {summary.nutritionLoggedDays} logged</small></article>
-   <article><span>Protein</span><strong>{number(summary.averageProtein)} g</strong><small>Avg target {number(summary.averageProteinTarget)} g · {summary.completeProteinDays} complete · {summary.nutritionLoggedDays} logged</small></article>
-   <article><span>Steps</span><strong>{number(summary.averageSteps)}</strong><small>{summary.stepsLoggedDays} logged days</small></article>
-   <article><span>Training</span><strong>{summary.completedWorkouts} completed</strong><small>{summary.completedStrength} strength sessions</small></article>
   </div>
-  <div className="progressCharts">
+  <div className="progressCharts periodSharedCharts">
    <MiniChart label="Weight" points={weightPoints} bounds={data.bounds} color="#4f6b62" onDate={onDate}/>
-   <MiniChart label="Calories" points={caloriePoints} bounds={data.bounds} color="#d98651" onDate={onDate}/>
-   <MiniChart label="Protein" points={proteinPoints} bounds={data.bounds} color="#7c6db2" onDate={onDate}/>
-   <MiniChart label="Steps" points={stepPoints} bounds={data.bounds} color="#4d78a8" onDate={onDate}/>
-   <MiniChart label="Workouts" points={workoutPoints} bounds={data.bounds} color="#7a8f45" onDate={onDate}/>
   </div>
+ </section>
+}
+
+export default function PeriodProgressView({domain,data,onDate}:{domain:'nutrition'|'training';data:PeriodProgress;onDate:(date:string)=>void}){
+ const summary=useMemo(()=>summarizePeriod(data),[data])
+ const caloriePoints=completeNutritionDays(data.nutrition,'calories').map(item=>({date:item.log_date,value:item.calories!}))
+ const proteinPoints=completeNutritionDays(data.nutrition,'protein_g').map(item=>({date:item.log_date,value:item.protein_g!}))
+ const stepPoints=data.metrics.filter(item=>item.steps!==null).map(item=>({date:item.log_date,value:item.steps!}))
+ const workoutByDate=new Map<string,number>()
+ for(const workout of data.workouts.filter(item=>item.status==='completed'))workoutByDate.set(workout.scheduled_date,(workoutByDate.get(workout.scheduled_date)??0)+1)
+ const workoutPoints=[...workoutByDate].map(([date,value])=>({date,value})).sort((a,b)=>a.date.localeCompare(b.date))
+ return <section className="periodDomainProgress">
+  {domain==='nutrition'?<>
+   <div className="periodSummaryGrid">
+    <article><span>Calories</span><strong>{number(summary.averageCalories)} kcal</strong><small>Avg target {number(summary.averageCalorieTarget)} · {summary.completeCalorieDays} complete · {summary.nutritionLoggedDays} logged</small></article>
+    <article><span>Protein</span><strong>{number(summary.averageProtein)} g</strong><small>Avg target {number(summary.averageProteinTarget)} g · {summary.completeProteinDays} complete · {summary.nutritionLoggedDays} logged</small></article>
+   </div>
+   <div className="progressCharts"><MiniChart label="Calories" points={caloriePoints} bounds={data.bounds} color="#d98651" onDate={onDate}/><MiniChart label="Protein" points={proteinPoints} bounds={data.bounds} color="#7c6db2" onDate={onDate}/></div>
+  </>:<>
+   <div className="periodSummaryGrid">
+    <article><span>Steps</span><strong>{number(summary.averageSteps)}</strong><small>{summary.stepsLoggedDays} logged days</small></article>
+    <article><span>Training</span><strong>{summary.completedWorkouts} completed</strong><small>{summary.completedStrength} strength sessions</small></article>
+   </div>
+   <div className="progressCharts"><MiniChart label="Steps" points={stepPoints} bounds={data.bounds} color="#4d78a8" onDate={onDate}/><MiniChart label="Workouts" points={workoutPoints} bounds={data.bounds} color="#7a8f45" onDate={onDate}/></div>
+  </>}
   <p className="periodFootnote">Averages use complete values only. Partial and missing days are not treated as zero. Tap a date below a chart to open that day.</p>
  </section>
 }

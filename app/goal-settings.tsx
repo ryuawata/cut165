@@ -10,22 +10,33 @@ import {
 } from '../lib/profile'
 import {calculateInitialTargets,calendarDateInTimezone,kilogramsToPounds,poundsToKilograms,shiftCalendarDate} from '../lib/targets'
 import {recommendedWeeklyWorkouts} from '../lib/coaching'
+import type {CustomWorkoutTemplate} from '../lib/custom-workouts'
+import type {WorkoutTemplate} from '../lib/workout-templates'
+import CustomWorkoutManager from './custom-workouts'
+import WorkoutTemplateEditor from './workout-template-editor'
 
 const errorText=(error:unknown)=>error instanceof Error?error.message:'Could not update the goal.'
 const displayedWeight=(pounds:number,unit:Profile['weight_unit'])=>unit==='kg'?poundsToKilograms(pounds):pounds
 
-export default function GoalSettings({session,profile,goal,target,currentWeightLbs,onClose,onGoalSaved,onProfileSaved}:{
+export type SettingsSection='goal'|'profile'|'workouts'
+
+export default function GoalSettings({session,profile,goal,target,currentWeightLbs,initialSection='goal',workoutTemplates,customWorkoutTemplates,onClose,onGoalSaved,onProfileSaved,onWorkoutTemplatesChange,onCustomWorkoutTemplatesChange}:{
  session:Session
  profile:Profile
  goal:Goal
  target:GoalTarget
  currentWeightLbs:number
+ initialSection?:SettingsSection
+ workoutTemplates:WorkoutTemplate[]
+ customWorkoutTemplates:CustomWorkoutTemplate[]
  onClose:()=>void
  onGoalSaved:(goal:Goal,target:GoalTarget)=>void
  onProfileSaved:(profile:Profile)=>void
+ onWorkoutTemplatesChange:(templates:WorkoutTemplate[])=>void
+ onCustomWorkoutTemplatesChange:(templates:CustomWorkoutTemplate[])=>void
 }){
  const initialProfileReady=hasCompleteCalculationProfile(profile)
- const [section,setSection]=useState<'goal'|'profile'>(initialProfileReady?'goal':'profile')
+ const [section,setSection]=useState<SettingsSection>(initialSection==='goal'&&!initialProfileReady?'profile':initialSection)
  const today=calendarDateInTimezone(profile.timezone)
  const effectiveFrom=target.effective_from===today?shiftCalendarDate(today,1):today
  const [targetWeight,setTargetWeight]=useState(displayedWeight(goal.target_weight_lbs,profile.weight_unit).toFixed(1))
@@ -116,8 +127,12 @@ export default function GoalSettings({session,profile,goal,target,currentWeightL
    <div className="settingsTabs" role="tablist" aria-label="Settings section">
     <button type="button" role="tab" aria-selected={section==='goal'} className={section==='goal'?'active':''} onClick={()=>setSection('goal')}>Goal</button>
     <button type="button" role="tab" aria-selected={section==='profile'} className={section==='profile'?'active':''} onClick={()=>setSection('profile')}>Profile</button>
+    <button type="button" role="tab" aria-selected={section==='workouts'} className={section==='workouts'?'active':''} onClick={()=>setSection('workouts')}>Workouts</button>
    </div>
-   {section==='profile'?<form onSubmit={saveProfileDetails}>
+   {section==='workouts'?<div className="workoutSettings">
+    <div className="settingsWorkoutSection"><p className="settingsIntro">Customize the CUT365 program. Changes affect future prescribed workouts; completed workout snapshots remain unchanged.</p><WorkoutTemplateEditor userId={session.user.id} templates={workoutTemplates} onChange={onWorkoutTemplatesChange}/></div>
+    <div className="settingsWorkoutSection"><CustomWorkoutManager userId={session.user.id} templates={customWorkoutTemplates} onChange={onCustomWorkoutTemplatesChange}/></div>
+   </div>:section==='profile'?<form onSubmit={saveProfileDetails}>
     <p className="settingsIntro">These details improve your target estimate. Saving them does not change your current plan.</p>
     <label>Birth year<input type="number" min="1900" max={new Date().getFullYear()-18} value={birthYear} onChange={event=>setBirthYear(event.target.value)} required/></label>
     <label>Gender<select value={sex} onChange={event=>setSex(event.target.value as ''|EnergyEstimationSex)} required><option value="">Choose</option><option value="female">Female</option><option value="male">Male</option></select></label>

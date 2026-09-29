@@ -1,9 +1,8 @@
 'use client'
-import {FormEvent,useEffect,useState} from 'react'
+import {FormEvent,useState} from 'react'
 import {supabase} from '../lib/supabase'
 import {
- completeCustomWorkout,createCustomWorkoutTemplate,deleteCustomWorkoutTemplate,
- getCompletedCustomWorkoutsForDate,getCustomWorkoutTemplates,updateCustomWorkoutTemplate,
+ createCustomWorkoutTemplate,deleteCustomWorkoutTemplate,updateCustomWorkoutTemplate,
  type CustomWorkoutCategory,type CustomWorkoutFormat,type CustomWorkoutInput,type CustomWorkoutTemplate
 } from '../lib/custom-workouts'
 import type {WorkoutExercise} from '../lib/workout-templates'
@@ -15,29 +14,14 @@ type Draft={
 const blank=():Draft=>({name:'',format:'guided',category:'strength',description:'',external_url:'',duration_minutes:'',exercises:[]})
 const errorText=(error:unknown)=>error instanceof Error?error.message:'Could not update My Workouts.'
 
-export default function CustomWorkouts({userId,logDate,isToday,onCompleted}:{
- userId:string;logDate:string;isToday:boolean;onCompleted:()=>Promise<void>
+export default function CustomWorkoutManager({userId,templates,onChange}:{
+ userId:string;templates:CustomWorkoutTemplate[];onChange:(templates:CustomWorkoutTemplate[])=>void
 }){
- const [templates,setTemplates]=useState<CustomWorkoutTemplate[]>([])
- const [completedIds,setCompletedIds]=useState<Set<string>>(new Set())
  const [open,setOpen]=useState(false)
  const [editing,setEditing]=useState<CustomWorkoutTemplate|null>(null)
  const [draft,setDraft]=useState<Draft>(blank)
  const [busy,setBusy]=useState<string|null>(null)
  const [message,setMessage]=useState('')
-
- useEffect(()=>{
-  let active=true
-  Promise.all([
-   getCustomWorkoutTemplates(supabase,userId),
-   getCompletedCustomWorkoutsForDate(supabase,userId,logDate)
-  ]).then(([nextTemplates,sessions])=>{
-   if(!active)return
-   setTemplates(nextTemplates)
-   setCompletedIds(new Set(sessions.flatMap(session=>session.custom_workout_template_id?[session.custom_workout_template_id]:[])))
-  }).catch(error=>{if(active)setMessage(errorText(error))})
-  return()=>{active=false}
- },[userId,logDate])
 
  const input=():CustomWorkoutInput=>({
   name:draft.name,format:draft.format,category:draft.category,
@@ -65,7 +49,7 @@ export default function CustomWorkouts({userId,logDate,isToday,onCompleted}:{
    const saved=editing
     ?await updateCustomWorkoutTemplate(supabase,userId,editing.id,input())
     :await createCustomWorkoutTemplate(supabase,userId,input())
-   setTemplates(current=>editing?current.map(item=>item.id===saved.id?saved:item):[...current,saved])
+   onChange(editing?templates.map(item=>item.id===saved.id?saved:item):[...templates,saved])
    setEditing(null);setDraft(blank());setOpen(false);setMessage('Workout saved')
   }catch(error){setMessage(errorText(error))}finally{setBusy(null)}
  }
@@ -75,18 +59,7 @@ export default function CustomWorkouts({userId,logDate,isToday,onCompleted}:{
   setBusy(`delete:${template.id}`);setMessage('')
   try{
    await deleteCustomWorkoutTemplate(supabase,userId,template.id)
-   setTemplates(current=>current.filter(item=>item.id!==template.id))
-  }catch(error){setMessage(errorText(error))}finally{setBusy(null)}
- }
-
- async function complete(template:CustomWorkoutTemplate){
-  if(busy)return
-  setBusy(`complete:${template.id}`);setMessage('')
-  try{
-   await completeCustomWorkout(supabase,{userId,logDate,template,isToday})
-   setCompletedIds(current=>new Set(current).add(template.id))
-   await onCompleted()
-   setMessage(`${template.name} completed`)
+   onChange(templates.filter(item=>item.id!==template.id))
   }catch(error){setMessage(errorText(error))}finally{setBusy(null)}
  }
 
@@ -108,7 +81,7 @@ export default function CustomWorkouts({userId,logDate,isToday,onCompleted}:{
    <div><span>{template.category}</span><h4>{template.name}</h4>{template.description&&<p>{template.description}</p>}<small>{template.duration_minutes?`${template.duration_minutes} min · `:''}{template.format}</small></div>
    {template.external_url&&<a href={template.external_url} target="_blank" rel="noopener noreferrer">Open workout ↗</a>}
    {template.format==='structured'&&<details><summary>{template.exercises.length} exercises</summary><ul>{template.exercises.map(exercise=><li key={`${exercise.name}-${exercise.sets}-${exercise.reps}`}>{exercise.name} · {exercise.sets} × {exercise.reps}</li>)}</ul></details>}
-   <div className="customWorkoutActions"><button type="button" className="completeCustom" onClick={()=>complete(template)} disabled={busy!==null||completedIds.has(template.id)}>{completedIds.has(template.id)?'Complete ✓':busy===`complete:${template.id}`?'Saving…':'Mark complete'}</button><button type="button" onClick={()=>startEdit(template)} disabled={busy!==null}>Edit</button><button type="button" onClick={()=>remove(template)} disabled={busy!==null}>Delete</button></div>
+   <div className="customWorkoutActions"><button type="button" onClick={()=>startEdit(template)} disabled={busy!==null}>Edit</button><button type="button" onClick={()=>remove(template)} disabled={busy!==null}>Delete</button></div>
   </article>)}</div>
   {open&&<form className="customWorkoutForm" onSubmit={save}>
    <label className="wide">Name<input value={draft.name} onChange={event=>setDraft({...draft,name:event.target.value})} placeholder="30-Min Full Body Workout" required/></label>
