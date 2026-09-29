@@ -19,12 +19,12 @@ test('date navigation precedes range navigation and Nutrition is the default dom
  assert.doesNotMatch(page,/setDashboardDomain\(domain\)[\s\S]{0,80}setSelectedDate/)
 })
 
-test('day domains stay mounted, hide the inactive panel, and keep Weight shared',()=>{
- const sharedWeight=page.indexOf('className="sharedWeight"')
+test('day domains stay mounted, hide the inactive panel, and keep daily measurements shared',()=>{
+ const dailyMetrics=page.indexOf('className="dailyMetrics"')
  const domainTabs=page.indexOf('className="domainTabs"')
  const split=page.indexOf('className="dashboardDomainPanel"')
- assert.ok(sharedWeight>0&&sharedWeight<domainTabs&&domainTabs<split)
- assert.match(page,/aria-label="Nutrition" hidden=\{dashboardDomain!==['"]nutrition['"]\}[\s\S]*NutritionPresets[\s\S]*NutritionMetric[\s\S]*nutritionEntries/)
+ assert.ok(domainTabs>0&&domainTabs<dailyMetrics&&dailyMetrics<split)
+ assert.match(page,/aria-label="Nutrition" hidden=\{dashboardDomain!==['"]nutrition['"]\}[\s\S]*NutritionMetric[\s\S]*NutritionPresets[\s\S]*nutritionEntries/)
  assert.match(page,/aria-label="Training" hidden=\{dashboardDomain!==['"]training['"]\}[\s\S]*className="trainingWrap"[\s\S]*CustomWorkoutLauncher/)
  assert.equal((page.match(/<NutritionPresets/g)??[]).length,1)
  assert.doesNotMatch(page,/dashboardDomain==='nutrition'\?<|dashboardDomain==='training'\?</)
@@ -53,7 +53,7 @@ test('workout configuration lives in Settings and daily launcher is execution-on
  assert.match(manager,/updateCustomWorkoutTemplate/)
  assert.match(manager,/deleteCustomWorkoutTemplate/)
  assert.match(launcher,/completeCustomWorkout/)
- assert.match(launcher,/Manage workouts in Settings/)
+ assert.match(launcher,/Manage routines/)
  assert.match(launcher,/target="_blank" rel="noopener noreferrer"/)
  assert.doesNotMatch(launcher,/>Edit<|>Delete<|New workout/)
 })
@@ -68,9 +68,25 @@ test('period domains split nutrition from training and drilldown preserves domai
  assert.doesNotMatch(drilldown,/setDashboardDomain/)
 })
 
-test('standalone Weight and Steps KPI cards fill their intentional wrappers',()=>{
- assert.match(page,/className="sharedWeight"[\s\S]*<Metric kind="weight"/)
- assert.match(page,/className="trainingMetrics"[\s\S]*<Metric kind="steps"/)
- assert.match(productCss,/\.sharedWeight>\.metric,\.trainingMetrics>\.metric\{display:block;width:100%\}/)
- assert.match(productCss,/@media\(max-width:650px\)[\s\S]*\.sharedWeight,\.trainingMetrics\{width:100%\}/)
+test('Weight and Steps are compact shared daily measurements after the domain switch',()=>{
+ assert.match(page,/className="domainTabs"[\s\S]*className="dailyMetrics"[\s\S]*<Metric kind="weight"[\s\S]*<Metric kind="steps"/)
+ assert.match(page,/className=\{`metric dailyMetric \$\{kind\}`\}/)
+ assert.match(productCss,/\.dailyMetrics\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/)
+ assert.match(productCss,/\.dailyMetric\{display:block;width:100%;min-height:112px/)
+ assert.doesNotMatch(page,/sharedWeight|trainingMetrics/)
+})
+
+test('Day nutrition has one primary Add food action and human partial-data copy',()=>{
+ assert.equal((page.match(/>\+ Add food<\/button>/g)??[]).length,1)
+ assert.doesNotMatch(page,/\+ Add entry|New Quick Add|>partial</)
+ assert.match(page,/Some entries don’t include carbs/)
+ assert.match(presets,/QUICK LOG/)
+ assert.match(presets,/Manage saved foods/)
+})
+
+test('nutrition entries are grouped by meal and the ambiguous Close signal is gone',()=>{
+ assert.match(page,/mealGroupOrder/)
+ assert.match(page,/groupedEntries\.map/)
+ assert.match(page,/TODAY’S FOOD/)
+ assert.doesNotMatch(page,/\['Close','warn'\]|className=\{`signal/)
 })

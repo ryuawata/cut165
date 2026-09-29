@@ -9,7 +9,7 @@ import type {MealSlot} from '../lib/nutrition'
 
 type Draft={name:string;meal_slot:''|MealSlot;calories:string;protein_g:string;carbs_g:string;fat_g:string;alcohol_servings:string}
 const blank=():Draft=>({name:'',meal_slot:'',calories:'',protein_g:'',carbs_g:'',fat_g:'',alcohol_servings:''})
-const text=(error:unknown)=>error instanceof Error?error.message:'Could not update Quick Add.'
+const text=(error:unknown)=>error instanceof Error?error.message:'Could not update the saved food.'
 const value=(input:string)=>input.trim()===''?null:Number(input)
 const summary=(preset:NutritionPreset)=>[
  preset.calories===null?null:`${preset.calories.toLocaleString()} kcal`,
@@ -51,7 +51,7 @@ export default function NutritionPresets({userId,logDate,dateLabel,onLogged}:{
     ?await updateNutritionPreset(supabase,userId,editing.id,input())
     :await createNutritionPreset(supabase,userId,input())
    setPresets(current=>editing?current.map(item=>item.id===saved.id?saved:item):[...current,saved])
-   setDraft(blank());setEditing(null);setOpen(false);setMessage('Quick Add saved')
+   setDraft(blank());setEditing(null);setOpen(false);setMessage('Saved food updated')
   }catch(error){setMessage(text(error))}
   finally{setBusy(null)}
  }
@@ -79,16 +79,16 @@ export default function NutritionPresets({userId,logDate,dateLabel,onLogged}:{
  }
 
  return <section className="presetQuickAdd">
-  <div className="presetHead"><div><p className="eyebrow">QUICK ADD</p><h3>Saved items</h3></div><button type="button" onClick={()=>{setEditing(null);setDraft(blank());setOpen(value=>!value);setMessage('')}}>{open?'Close':'+ New Quick Add'}</button></div>
+  <div className="presetHead"><div><p className="eyebrow">QUICK LOG</p><h3>Saved foods</h3></div><button type="button" aria-expanded={open} onClick={()=>{setEditing(null);setDraft(blank());setOpen(value=>!value);setMessage('')}}>{open?'Done':'Manage saved foods'}</button></div>
   {presets.length>0?<div className="presetRail">{presets.map(preset=><article className="presetCard" key={preset.id}>
-   <button type="button" className="presetLog" onClick={()=>log(preset)} disabled={busy!==null}><strong>{preset.name}</strong><small>{summary(preset)}</small><span>{busy===`log:${preset.id}`?'Adding…':`Add to ${dateLabel}`}</span></button>
+   <button type="button" className="presetLog" onClick={()=>log(preset)} disabled={busy!==null} aria-label={`Add ${preset.name} to ${dateLabel}`}><strong>{preset.name}</strong><small>{summary(preset)}</small><span aria-hidden="true">{busy===`log:${preset.id}`?'Adding…':'+'}</span></button>
    <div><button type="button" onClick={()=>edit(preset)}>Edit</button><button type="button" onClick={()=>remove(preset)} disabled={busy!==null}>Delete</button></div>
-  </article>)}</div>:<p className="presetEmpty">Save frequent foods or meals for one-tap logging.</p>}
+  </article>)}</div>:<p className="presetEmpty">Save foods you eat often for one-tap logging.</p>}
   {open&&<form className="presetForm" onSubmit={save}>
    <label className="wide">Name<input value={draft.name} onChange={event=>setDraft({...draft,name:event.target.value})} placeholder="Protein shake" required/></label>
    <label>Meal<select value={draft.meal_slot} onChange={event=>setDraft({...draft,meal_slot:event.target.value as ''|MealSlot})}><option value="">Optional</option><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option><option value="snack">Snack</option><option value="drink">Drink</option></select></label>
    {(['calories','protein_g','carbs_g','fat_g','alcohol_servings'] as const).map(metric=><label key={metric}>{metric==='protein_g'?'Protein (g)':metric==='carbs_g'?'Carbs (g)':metric==='fat_g'?'Fat (g)':metric==='alcohol_servings'?'Alcohol (servings)':'Calories (kcal)'}<input type="number" min="0" step="any" value={draft[metric]} onChange={event=>setDraft({...draft,[metric]:event.target.value})} placeholder="—"/></label>)}
-   <div className="presetActions"><button type="button" className="quiet" onClick={()=>{setOpen(false);setEditing(null)}}>Cancel</button><button disabled={busy!==null}>{busy==='save'?'Saving…':editing?'Save changes':'Create Quick Add'}</button></div>
+   <div className="presetActions"><button type="button" className="quiet" onClick={()=>{setOpen(false);setEditing(null)}}>Cancel</button><button disabled={busy!==null}>{busy==='save'?'Saving…':editing?'Save changes':'Save food'}</button></div>
   </form>}
   {message&&<p className="inlineSaveState" role="status">{message}</p>}
  </section>

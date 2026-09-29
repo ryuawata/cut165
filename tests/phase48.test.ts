@@ -307,7 +307,7 @@ test('Phase 4.8 UI exposes units, entry parity, one shared form, and water contr
   assert.match(page,new RegExp(label.replace(/[()]/g,'\\$&')))
   assert.match(presets,new RegExp(label.replace(/[()]/g,'\\$&')))
  }
- assert.match(page,/\+ Add entry/)
+ assert.match(page,/\+ Add food/)
  assert.equal(page.match(/id="one-off-entry"/g)?.length,1)
  for(const amount of [8,12,16,24])assert.match(page,new RegExp(`\\+\\{amount\\} oz|\\+${amount} oz`))
 })

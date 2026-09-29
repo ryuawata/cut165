@@ -28,13 +28,13 @@ export default function CustomWorkoutLauncher({userId,logDate,isToday,templates,
  }
 
  return <section className="myWorkouts workoutLauncher">
-  <div className="myWorkoutsHead"><div><p className="eyebrow">MY WORKOUTS</p><h3>Saved routines</h3></div><button type="button" onClick={onManage}>Manage workouts in Settings</button></div>
-  {templates.length===0&&<p className="workoutEmpty">Create a reusable workout in Settings to launch it here.</p>}
+  <div className="myWorkoutsHead"><div><p className="eyebrow">SAVED WORKOUTS</p><h3>Routines</h3></div><button type="button" onClick={onManage}>Manage routines</button></div>
+  {templates.length===0&&<p className="workoutEmpty">No saved routines yet. <button type="button" onClick={onManage}>Create one in Settings</button></p>}
   <div className="customWorkoutGrid">{templates.map(template=><article className="customWorkoutCard" key={template.id}>
    <div><span>{template.category}</span><h4>{template.name}</h4>{template.description&&<p>{template.description}</p>}<small>{template.duration_minutes?`${template.duration_minutes} min · `:''}{template.format}</small></div>
-   {template.external_url&&<a href={template.external_url} target="_blank" rel="noopener noreferrer">Open workout ↗</a>}
+   {template.external_url&&<a href={template.external_url} target="_blank" rel="noopener noreferrer">Start routine ↗</a>}
    {template.format==='structured'&&<div className="launcherExercises"><strong>{template.exercises.length} exercises</strong><ul>{template.exercises.map(exercise=><li key={`${exercise.name}-${exercise.sets}-${exercise.reps}`}>{exercise.name} · {exercise.sets} × {exercise.reps}</li>)}</ul></div>}
-   <div className="customWorkoutActions"><button type="button" className="completeCustom" onClick={()=>complete(template)} disabled={busy!==null||completedIds.has(template.id)}>{completedIds.has(template.id)?'Complete ✓':busy===template.id?'Saving…':'Mark complete'}</button></div>
+   <div className="customWorkoutActions"><button type="button" className="completeCustom" onClick={()=>complete(template)} disabled={busy!==null||completedIds.has(template.id)}>{completedIds.has(template.id)?'Workout complete ✓':busy===template.id?'Saving…':'Mark workout complete'}</button></div>
   </article>)}</div>
   {message&&<p className="inlineSaveState" role="status">{message}</p>}
  </section>

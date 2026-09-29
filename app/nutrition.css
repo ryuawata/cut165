@@ -50,3 +50,17 @@
  .nutritionEntriesHead{align-items:center}
  .presetQuickAdd{padding:17px}.presetRail{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:4px}.presetCard{min-width:210px;scroll-snap-align:start}.presetHead{align-items:center}.presetHead>button{padding:9px 11px}
 }
+
+/* Lightweight daily logging sections */
+.oneOffMeal{margin:0 0 18px;border-radius:16px;background:#fafaf8}.oneOffMeal[hidden]{display:none}.oneOffMeal .mealFields{padding-top:0;border-top:0;margin-top:0}.mealActions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px}.mealActions .quiet{background:#efefeb;color:#555}
+.nutritionMetric{min-height:165px}.nutritionMetric .metricValue{display:flex;align-items:baseline;gap:10px;margin-top:23px}.metricCurrent{display:flex;align-items:baseline;min-width:0}.metricCurrent input{width:min(150px,100%)}.metricTarget{color:#676767;font-size:14px;font-weight:600;white-space:nowrap}.nutritionMetric .fieldSaveState{bottom:14px}
+.nutritionSoft p{margin:7px 0 0;color:#6b6b6b;font-size:10px;line-height:1.35}
+.presetQuickAdd{margin:28px 0 0;border:0;border-top:1px solid var(--line);border-radius:0;padding:24px 0 0}.presetHead>button{border:0;background:none;color:#555;padding:8px 0;font-size:10px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}.presetRail{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.presetCard{border-radius:14px}.presetLog{position:relative;min-height:84px;padding:13px 42px 13px 14px;background:#fafaf8;cursor:pointer}.presetLog small{color:#696969}.presetLog span{position:absolute;right:13px;top:50%;display:grid;place-items:center;width:26px;height:26px;margin:0;padding:0;transform:translateY(-50%);border-radius:50%;background:#171717;color:#fff;font-size:17px}.presetCard>div{justify-content:flex-end}.presetCard>div button{flex:0 0 auto;padding:7px 9px}.presetEmpty{margin-bottom:0}
+.nutritionEntries{margin-top:30px;border:0;border-top:1px solid var(--line);border-radius:0;padding:24px 0 0}.nutritionEntriesHead{padding-bottom:7px}.nutritionEntriesHead>span{font-size:10px;color:#707070}.mealGroup{padding-top:16px}.mealGroup h4{margin:0;padding-bottom:7px;font-size:9px;letter-spacing:1.15px;text-transform:uppercase;color:#6d6d6d}.entryRow{padding:13px 0}.entryRow small{color:#666}.entryRowActions button{min-height:34px}.entryEmpty{padding-top:18px}.notes{margin-top:26px;padding-top:22px;border-top:1px solid var(--line)}.notes textarea{height:82px;background:#fafaf8}
+
+@media(max-width:650px){
+ .oneOffMeal{padding:14px}.mealActions{display:grid;grid-template-columns:1fr 2fr}.mealActions button{width:100%}
+ .nutritionMetric{min-height:150px}.nutritionMetric .metricValue{display:grid;gap:3px;margin-top:18px}.metricCurrent input{width:100%}.metricTarget{font-size:12px}.nutritionMetric .fieldSaveState{position:static;display:block;margin-top:8px;max-width:none;text-align:left}
+ .presetQuickAdd{padding-top:21px}.presetRail{display:flex}.presetHead{align-items:end}.presetHead>button{min-height:40px}.nutritionEntries{margin-top:26px;padding-top:21px}
+ .entryRowActions button{min-width:58px;min-height:40px}.nutritionEntriesHead{align-items:end}
+}

@@ -28,7 +28,7 @@ import {
  completeProfileOnboarding,dismissGettingStarted,getProfile,hasCompleteCalculationProfile,saveCompatibilityTimezone,type Profile
 } from '../lib/profile'
 import {getActiveGoal,getCurrentGoalTarget,getEffectiveGoalTarget,type Goal,type GoalTarget} from '../lib/goals'
-import {actualWeightChange,calendarDateInTimezone,caloriePace,formatWeightValue,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms,primaryCalorieTarget} from '../lib/targets'
+import {actualWeightChange,calendarDateInTimezone,formatWeightValue,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms,primaryCalorieTarget} from '../lib/targets'
 import {decideAccountBootstrap,decideCompatibilityTimezone} from '../lib/account-bootstrap'
 import {
  calendarWeekBounds,nextProgramWorkout,recommendedWeeklyWorkouts,workoutName
@@ -49,6 +49,7 @@ import {
 type MealDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string;fat_g:string;alcohol_servings:string}
 type EditDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string;fat_g:string;alcohol_servings:string}
 type DashboardDomain='nutrition'|'training'
+const mealGroupOrder=['breakfast','lunch','dinner','snack','drink','other'] as const
 
 const localISO=(date=new Date())=>{
  const year=date.getFullYear()
@@ -167,6 +168,16 @@ export default function Page(){
  const today=profile?calendarDateInTimezone(profile.timezone):localISO()
  const isToday=selectedDate===today
  const selectedLabel=localDate(selectedDate).toLocaleDateString(undefined,{month:'short',day:'numeric'})
+ const groupedEntries=useMemo(()=>{
+  const groups:Record<string,NutritionEntry[]>={}
+  for(const entry of entries){
+   const slot=entry.meal_slot??'other'
+   const group=groups[slot]??[]
+   group.push(entry)
+   groups[slot]=group
+  }
+  return mealGroupOrder.flatMap(slot=>groups[slot]?.length?[{slot,entries:groups[slot]}]:[])
+ },[entries])
 
  const refreshPeriod=useCallback((
   view:Exclude<TrackingView,'day'>,anchorDate:string,userId:string,goalId:string
@@ -456,15 +467,6 @@ export default function Page(){
  const actualChange=actualWeightChange(startWeight,latest)
  const displayedChange=Math.abs(displayWeight(actualChange.change,weightUnit)??0)
  const changeLabel=actualChange.direction==='unchanged'?'No change':actualChange.direction
- const status=useMemo(()=>{
-  if(!targetForDay||totals.entry_count===0)return ['Open','open']
-  if(totals.calories_unknown_count>0||totals.protein_unknown_count>0)return ['Partial','warn']
-  const calories=Number(totals.calories||0)
-  const pace=caloriePace(calories,targetForDay.calorie_target_min,targetForDay.calorie_target_max)
-  if(pace==='on_pace'&&Number(totals.protein_g||0)>=targetForDay.protein_target_g)return ['On pace','good']
-  if(pace!=='over')return ['Close','warn']
-  return ['Over target','bad']
- },[totals,targetForDay])
  const nextWorkout=workoutFacts?nextProgramWorkout(workoutFacts.lastCompleted):'full_body_a'
  const strengthSuppressed=isToday&&!workoutPlan.completed&&(!workoutFacts||!workoutFacts.strengthRecommended)
 
@@ -757,9 +759,9 @@ export default function Page(){
  </main>
 
  return <main className="app">
-  <nav>
+  <nav className="appHeader">
    <div><div className="brand">{goalIdentity(activeGoal.target_weight_lbs)}</div><small className="productMark">CUT365</small></div>
-   <div className="navRight"><button onClick={()=>openSettings()}>Settings</button><button onClick={()=>supabase.auth.signOut()}>Sign out</button></div>
+   <div className="navRight"><button className="settingsLink" onClick={()=>openSettings()}>Settings</button><button className="signOutLink" onClick={()=>supabase.auth.signOut()}>Sign out</button></div>
   </nav>
 
   {settingsOpen&&<GoalSettings
@@ -799,26 +801,23 @@ export default function Page(){
    <div className="bar"><i style={{width:`${progress}%`}}/></div>
   </section>
 
-  <section className="sharedWeight">
-   <Metric kind="weight" icon="●" label="Weight" value={displayWeight(weightLbs,weightUnit)} unit={weightUnit} target={`Destination · ${formatWeightValue(displayedTarget)} ${weightUnit}`} step=".1" saveState={saveState.weight} onChange={value=>setWeightLbs(value===''?null:storedWeight(Number(value),weightUnit))} onSave={autosaveWeight}/>
-  </section>
-
   <div className="domainTabs" role="tablist" aria-label="Dashboard domain">
    {(['nutrition','training'] as const).map(domain=><button type="button" role="tab" aria-selected={dashboardDomain===domain} className={dashboardDomain===domain?'active':''} key={domain} onClick={()=>setDashboardDomain(domain)}>{domain[0].toUpperCase()+domain.slice(1)}</button>)}
   </div>
 
+  <section className="dailyMetrics" aria-label="Daily measurements">
+   <Metric kind="weight" icon="●" label="Weight" value={displayWeight(weightLbs,weightUnit)} unit={weightUnit} target={`Goal ${formatWeightValue(displayedTarget)} ${weightUnit}`} step=".1" saveState={saveState.weight} onChange={value=>setWeightLbs(value===''?null:storedWeight(Number(value),weightUnit))} onSave={autosaveWeight}/>
+   <Metric kind="steps" icon="↗" label="Steps" value={metrics.steps} unit="" target={`Goal ${formatTarget(targetForDay?.steps_target,0)}`} progress={targetForDay?.steps_target?Math.min(100,Number(metrics.steps??0)/targetForDay.steps_target*100):undefined} saveState={saveState.steps} onChange={value=>metricNumber('steps',value)} onSave={()=>autosaveMetric('steps',metrics.steps)}/>
+  </section>
+
   <section className="dashboardDomainPanel" role="tabpanel" aria-label="Nutrition" hidden={dashboardDomain!=='nutrition'}>
 
   <div className="sectionHead">
-   <div><p className="eyebrow">DAILY SIGNALS</p><h2>{isToday?'Today':selectedLabel}</h2></div>
-   <span className={`signal ${status[1]}`}>● {status[0]}</span>
+   <div><p className="eyebrow">NUTRITION</p><h2>{isToday?'Today':selectedLabel}</h2></div>
+   <button type="button" className="primaryFoodAction" onClick={openMealForm}>+ Add food</button>
   </div>
 
-  <NutritionPresets userId={session.user.id} logDate={selectedDate} dateLabel={isToday?'today':selectedLabel} onLogged={()=>refreshNutrition(selectedDate)}/>
-
-  <section className="quickAdd oneOffMeal" id="one-off-entry">
-   <details className="addMeal" open={mealOpen} onToggle={event=>setMealOpen(event.currentTarget.open)}>
-    <summary className="addEntryAction">+ Add entry</summary>
+  <section className="quickAdd oneOffMeal" id="one-off-entry" hidden={!mealOpen}>
     <form className="mealFields" onSubmit={addMeal}>
      <label className="mealDescription"><span>Description</span><input type="text" placeholder="Dinner" value={meal.description} onChange={event=>setMeal({...meal,description:event.target.value})} required/></label>
      <label><span>Meal</span><select value={meal.mealSlot} onChange={event=>setMeal({...meal,mealSlot:event.target.value as ''|MealSlot})}><option value="">Optional</option><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option><option value="snack">Snack</option><option value="drink">Drink</option></select></label>
@@ -827,39 +826,40 @@ export default function Page(){
      <label><span>Carbs (g)</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="—" value={meal.carbs_g} onChange={event=>setMeal({...meal,carbs_g:event.target.value})}/></label>
      <label><span>Fat (g)</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="—" value={meal.fat_g} onChange={event=>setMeal({...meal,fat_g:event.target.value})}/></label>
      <label><span>Alcohol (servings)</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="—" value={meal.alcohol_servings} onChange={event=>setMeal({...meal,alcohol_servings:event.target.value})}/></label>
-     <button disabled={nutritionBusy!==null}>{nutritionBusy==='meal'?'Adding…':`Add to ${isToday?'today':selectedLabel}`}</button>
+     <div className="mealActions"><button type="button" className="quiet" onClick={()=>setMealOpen(false)}>Cancel</button><button disabled={nutritionBusy!==null}>{nutritionBusy==='meal'?'Adding…':`Add food to ${isToday?'today':selectedLabel}`}</button></div>
     </form>
-   </details>
-   {(nutritionError||nutritionNotice)&&<div className={`nutritionFeedback ${nutritionError?'error':''}`} role="status">
+  </section>
+  {(nutritionError||nutritionNotice)&&<div className={`nutritionFeedback ${nutritionError?'error':''}`} role="status">
     <span>{nutritionError||nutritionNotice?.text}</span>
     {!nutritionError&&nutritionNotice?.entryId&&<button type="button" onClick={undoLastAdd} disabled={nutritionBusy!==null}>Undo</button>}
-   </div>}
-  </section>
+  </div>}
 
   <section className="metrics">
-   <NutritionMetric kind="calories" icon="◒" label="Calories" value={totals.calories} unit="kcal" target={`Goal · ${targetForDay?formatTarget(primaryCalorieTarget(targetForDay.calorie_target_min,targetForDay.calorie_target_max),0):'—'} kcal`} partial={totals.calories_unknown_count>0} loading={nutritionLoading} saveState={saveState.calories} onSave={value=>replaceTotal('calories',value)}/>
-   <NutritionMetric kind="protein" icon="◆" label="Protein" value={totals.protein_g} unit="g" target={`Goal · ${formatTarget(targetForDay?.protein_target_g)}+`} partial={totals.protein_unknown_count>0} loading={nutritionLoading} saveState={saveState.protein_g} onSave={value=>replaceTotal('protein_g',value)}/>
+   <NutritionMetric kind="calories" icon="◒" label="Calories" value={totals.calories} unit="kcal" target={`${targetForDay?formatTarget(primaryCalorieTarget(targetForDay.calorie_target_min,targetForDay.calorie_target_max),0):'—'} kcal`} partial={totals.calories_unknown_count>0} loading={nutritionLoading} saveState={saveState.calories} onSave={value=>replaceTotal('calories',value)}/>
+   <NutritionMetric kind="protein" icon="◆" label="Protein" value={totals.protein_g} unit="g" target={`${formatTarget(targetForDay?.protein_target_g)}g`} partial={totals.protein_unknown_count>0} loading={nutritionLoading} saveState={saveState.protein_g} onSave={value=>replaceTotal('protein_g',value)}/>
   </section>
 
   <section className="softGrid">
    <label className="softCard waterCard"><span>Water <small>Goal · {formatTarget(targetForDay?.water_target_oz)} oz/day</small></span><div><input type="number" value={metrics.water_oz??''} placeholder="0" onChange={event=>metricNumber('water_oz',event.target.value)} onBlur={()=>queueWaterSave(selectedDate,metrics.water_oz)} onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur()}}/><b>/ {formatTarget(targetForDay?.water_target_oz)} oz</b></div><span className="waterIncrements">{[8,12,16,24].map(amount=><button type="button" key={amount} onClick={()=>incrementWater(amount)}>+{amount} oz</button>)}</span>{saveState.water_oz&&<em className="fieldSaveState">{saveState.water_oz}</em>}</label>
-   <article className="softCard nutritionSoft"><span>Carbs <small>{targetForDay?.carb_target_g===null?'No fixed target':targetForDay?`Goal · ${formatTarget(targetForDay.carb_target_g)}g`:'Loading target'}</small></span><div><strong>{nutritionLoading?'—':formatNumber(totals.carbs_g)}</strong><b>g</b>{totals.carbs_unknown_count>0&&<em>partial</em>}</div></article>
+   <article className="softCard nutritionSoft"><span>Carbs <small>{targetForDay?.carb_target_g===null?'No target':targetForDay?`Goal · ${formatTarget(targetForDay.carb_target_g)}g`:'Loading target'}</small></span><div><strong>{nutritionLoading?'—':formatNumber(totals.carbs_g)}</strong><b>g</b></div>{totals.carbs_unknown_count>0&&<p>Some entries don’t include carbs</p>}</article>
   </section>
 
+  <NutritionPresets userId={session.user.id} logDate={selectedDate} dateLabel={isToday?'today':selectedLabel} onLogged={()=>refreshNutrition(selectedDate)}/>
+
   <section className="nutritionEntries" aria-busy={nutritionLoading}>
-   <div className="nutritionEntriesHead"><div><p className="eyebrow">NUTRITION ENTRIES</p><h3>{isToday?'Today':selectedLabel}</h3></div><div><span>{entries.length} {entries.length===1?'entry':'entries'}</span><button type="button" className="listAddEntry" onClick={openMealForm}>+ Add entry</button></div></div>
+   <div className="nutritionEntriesHead"><div><p className="eyebrow">TODAY’S FOOD</p><h3>{isToday?'Today':selectedLabel}</h3></div><span>{entries.length} {entries.length===1?'entry':'entries'}</span></div>
    {nutritionLoading&&<p className="entryEmpty">Loading nutrition…</p>}
-   {!nutritionLoading&&!entries.length&&<p className="entryEmpty">No nutrition logged for this day yet.</p>}
-   {!nutritionLoading&&entries.map(entry=>editingId===entry.id&&editDraft?
+   {!nutritionLoading&&!entries.length&&<p className="entryEmpty">No food logged yet. Use <strong>+ Add food</strong> to get started.</p>}
+   {!nutritionLoading&&groupedEntries.map(group=><section className="mealGroup" key={group.slot}><h4>{group.slot}</h4>{group.entries.map(entry=>editingId===entry.id&&editDraft?
     <form className="entryEdit" key={entry.id} onSubmit={event=>saveEntryEdit(event,entry)}>
      <div className="entryEditTop"><input type="text" value={editDraft.description} onChange={event=>setEditDraft({...editDraft,description:event.target.value})} aria-label="Description" required/><select value={editDraft.mealSlot} onChange={event=>setEditDraft({...editDraft,mealSlot:event.target.value as ''|MealSlot})} aria-label="Meal slot"><option value="">No meal slot</option><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option><option value="snack">Snack</option><option value="drink">Drink</option></select></div>
      <div className="entryEditMetrics"><label>Calories<input type="number" min="0" step="any" value={editDraft.calories} onChange={event=>setEditDraft({...editDraft,calories:event.target.value})}/></label><label>Protein<input type="number" min="0" step="any" value={editDraft.protein_g} onChange={event=>setEditDraft({...editDraft,protein_g:event.target.value})}/></label><label>Carbs<input type="number" min="0" step="any" value={editDraft.carbs_g} onChange={event=>setEditDraft({...editDraft,carbs_g:event.target.value})}/></label><label>Fat<input type="number" min="0" step="any" value={editDraft.fat_g} onChange={event=>setEditDraft({...editDraft,fat_g:event.target.value})}/></label><label>Alcohol<input type="number" min="0" step="any" value={editDraft.alcohol_servings} onChange={event=>setEditDraft({...editDraft,alcohol_servings:event.target.value})}/></label></div>
      <div className="entryActions"><button disabled={nutritionBusy!==null}>{nutritionBusy===`edit:${entry.id}`?'Saving…':'Save entry'}</button><button type="button" className="quiet" onClick={()=>{setEditingId(null);setEditDraft(null)}} disabled={nutritionBusy!==null}>Cancel</button><button type="button" className="delete" onClick={()=>removeEntry(entry)} disabled={nutritionBusy!==null}>Delete</button></div>
     </form>
     :<article className="entryRow" key={entry.id}>
-     <div><span className="entryLabel">{entry.meal_slot||entry.entry_type.replace('_',' ')}</span><strong>{displayDescription(entry)}</strong><small>{entrySummary(entry)}</small></div>
+     <div><strong>{displayDescription(entry)}</strong><small>{entrySummary(entry)}</small></div>
      <div className="entryRowActions">{entry.entry_type!=='adjustment'&&<button onClick={()=>beginEdit(entry)} disabled={nutritionBusy!==null}>Edit</button>}<button onClick={()=>removeEntry(entry)} disabled={nutritionBusy!==null}>{entry.entry_type==='adjustment'?'Revert':'Delete'}</button></div>
-    </article>)}
+    </article>)}</section>)}
   </section>
 
   <label className="notes"><span>Notes {saveState.notes&&<small>{saveState.notes}</small>}</span><textarea placeholder="Dinner out, hunger, workout, anything useful..." value={metrics.notes||''} onChange={event=>setMetrics(current=>({...current,notes:event.target.value}))} onBlur={()=>autosaveMetric('notes',metrics.notes)}/></label>
@@ -867,7 +867,7 @@ export default function Page(){
   <section className="dashboardDomainPanel" role="tabpanel" aria-label="Training" hidden={dashboardDomain!=='training'}>
    <section className="trainingWrap">
     <p className="eyebrow">{isToday?"TODAY'S TRAINING":"PRESCRIBED TRAINING"}</p>
-    {strengthSuppressed?<div className="trainingRestState"><strong>{workoutFacts?'No strength workout today':'Checking today’s training…'}</strong><span>{workoutFacts?`Next CUT365 workout: ${workoutName(nextWorkout)}`:'Reviewing completed workouts'}</span></div>:<article className="trainingCard expandedTrainingCard">
+    {strengthSuppressed?<div className="trainingRestState"><div><span>RECOVERY</span><strong>{workoutFacts?'Rest day':'Checking today’s training…'}</strong></div><span>{workoutFacts?`Next workout: ${workoutName(nextWorkout)}`:'Reviewing completed workouts'}</span></div>:<article className="trainingCard expandedTrainingCard">
      <header>
       <span className="trainingTitle"><strong>{training.name}</strong><small>{training.type} <i>·</i> {training.duration}</small></span>
      </header>
@@ -886,7 +886,6 @@ export default function Page(){
      </div>
     </article>}
    </section>
-   <section className="trainingMetrics"><Metric kind="steps" icon="↗" label="Steps" value={metrics.steps} unit="" target={`Goal · ${formatTarget(targetForDay?.steps_target,0)}+`} saveState={saveState.steps} onChange={value=>metricNumber('steps',value)} onSave={()=>autosaveMetric('steps',metrics.steps)}/></section>
    <CustomWorkoutLauncher userId={session.user.id} logDate={selectedDate} isToday={isToday} templates={customWorkoutTemplates} completedIds={completedCustomWorkoutIds} onCompleted={finishCustomWorkout} onManage={()=>openSettings('workouts')}/>
   </section>
   </>:<>
@@ -930,21 +929,21 @@ function NutritionMetric({kind,icon,label,value,unit,target,partial,loading,save
   void onSave(desired)
  }
  return <label className={`metric ${kind} nutritionMetric`}>
-  <div className="metricTop"><i>{icon}</i><span>{label}</span>{partial&&<em>partial</em>}</div>
-  <div className="metricValue"><input type="number" min="0" step="any" value={loading?'':draft} placeholder="—" disabled={loading||partial} onChange={event=>setDraft(event.target.value)} onBlur={commit} onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur()}}/><b>{unit}</b></div>
-  <small>{target}</small>
-  {partial?<em className="fieldSaveState">Complete partial entries before replacing this total.</em>:saveState&&<em className="fieldSaveState">{saveState}</em>}
+  <div className="metricTop"><i>{icon}</i><span>{label}</span>{partial&&<em>Some data missing</em>}</div>
+  <div className="metricValue"><span className="metricCurrent"><input type="number" min="0" step="any" value={loading?'':draft} placeholder="—" disabled={loading||partial} onChange={event=>setDraft(event.target.value)} onBlur={commit} onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur()}}/><b>{unit}</b></span><span className="metricTarget">/ {target}</span></div>
+  {partial?<em className="fieldSaveState">Complete entries with missing values before replacing this total.</em>:saveState&&<em className="fieldSaveState">{saveState}</em>}
  </label>
 }
 
-function Metric({kind,icon,label,value,unit,target,onChange,onSave,saveState,step='1'}:{
+function Metric({kind,icon,label,value,unit,target,onChange,onSave,saveState,step='1',progress}:{
  kind:string;icon:string;label:string;value:number|null;unit:string;target:string
- onChange:(value:string)=>void;onSave:()=>void;saveState?:string;step?:string
+ onChange:(value:string)=>void;onSave:()=>void;saveState?:string;step?:string;progress?:number
 }){
- return <label className={`metric ${kind}`}>
+ return <label className={`metric dailyMetric ${kind}`}>
   <div className="metricTop"><i>{icon}</i><span>{label}</span></div>
-  <div className="metricValue"><input type="number" min="0" step={step} value={value??''} placeholder="—" onChange={event=>onChange(event.target.value)} onBlur={onSave} onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur()}}/><b>{unit}</b></div>
-  <small>{target}</small>
+  <div className="metricValue"><input type="number" min="0" step={step} value={value??''} placeholder={kind==='weight'?'Not logged':'0'} aria-label={`${label} value`} onChange={event=>onChange(event.target.value)} onBlur={onSave} onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur()}}/><b>{unit}</b></div>
+  <small>{value===null&&kind==='weight'?'Tap to log · ':''}{target}</small>
+  {progress!==undefined&&<span className="compactProgress" aria-hidden="true"><i style={{width:`${progress}%`}}/></span>}
   {saveState&&<em className="fieldSaveState">{saveState}</em>}
  </label>
 }
