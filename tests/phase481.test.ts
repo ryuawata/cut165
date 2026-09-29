@@ -8,6 +8,7 @@ const manager=readFileSync(new URL('../app/custom-workouts.tsx',import.meta.url)
 const launcher=readFileSync(new URL('../app/custom-workout-launcher.tsx',import.meta.url),'utf8')
 const periods=readFileSync(new URL('../app/period-progress.tsx',import.meta.url),'utf8')
 const presets=readFileSync(new URL('../app/nutrition-presets.tsx',import.meta.url),'utf8')
+const productCss=readFileSync(new URL('../app/product.css',import.meta.url),'utf8')
 
 test('date navigation precedes range navigation and Nutrition is the default domain',()=>{
  assert.ok(page.indexOf('className="dateNavRow"')<page.indexOf('className="trackingViewTabs"'))
@@ -65,4 +66,11 @@ test('period domains split nutrition from training and drilldown preserves domai
  assert.match(drilldown,/setTrackingView\('day'\)/)
  assert.match(drilldown,/selectDate\(logDate\)/)
  assert.doesNotMatch(drilldown,/setDashboardDomain/)
+})
+
+test('standalone Weight and Steps KPI cards fill their intentional wrappers',()=>{
+ assert.match(page,/className="sharedWeight"[\s\S]*<Metric kind="weight"/)
+ assert.match(page,/className="trainingMetrics"[\s\S]*<Metric kind="steps"/)
+ assert.match(productCss,/\.sharedWeight>\.metric,\.trainingMetrics>\.metric\{display:block;width:100%\}/)
+ assert.match(productCss,/@media\(max-width:650px\)[\s\S]*\.sharedWeight,\.trainingMetrics\{width:100%\}/)
 })
