@@ -113,7 +113,7 @@ test('calendar periods use Monday boundaries, month boundaries, and block future
  assert.equal(calendarDateInTimezone('America/Chicago',new Date('2026-09-29T03:30:00Z')),'2026-09-28')
 })
 
-test('period summaries exclude only the affected partial metric and use matching target dates',()=>{
+test('period summaries exclude only the affected partial metric and average fully covered targets',()=>{
  const targets=[
   {effective_from:'2026-09-01',effective_to:'2026-09-16',calorie_target_min:1600,calorie_target_max:1800,protein_target_g:140},
   {effective_from:'2026-09-16',effective_to:null,calorie_target_min:1800,calorie_target_max:2000,protein_target_g:150}
@@ -147,6 +147,27 @@ test('period summaries exclude only the affected partial metric and use matching
  assert.equal(summary.averageProteinTarget,150)
  assert.equal(targetForDate(progress.targets,'2026-09-15')?.protein_target_g,140)
  assert.equal(targetForDate(progress.targets,'2026-09-16')?.protein_target_g,150)
+})
+
+test('period target averages are unavailable when any complete metric day lacks a target',()=>{
+ const progress={
+  bounds:{start:'2026-09-14',endExclusive:'2026-09-21'},weights:[],
+  nutrition:[
+   {log_date:'2026-09-15',entry_count:1,calories:100,protein_g:20,calories_unknown_count:0,protein_unknown_count:0},
+   {log_date:'2026-09-16',entry_count:1,calories:300,protein_g:60,calories_unknown_count:0,protein_unknown_count:0}
+  ],
+  metrics:[],workouts:[],
+  targets:[
+   {effective_from:'2026-09-15',effective_to:'2026-09-16',calorie_target_min:1600,calorie_target_max:1800,protein_target_g:140}
+  ]
+ } as unknown as PeriodProgress
+ const summary=summarizePeriod(progress)
+ assert.equal(summary.averageCalories,200)
+ assert.equal(summary.averageProtein,40)
+ assert.equal(summary.completeCalorieDays,2)
+ assert.equal(summary.completeProteinDays,2)
+ assert.equal(summary.averageCalorieTarget,null)
+ assert.equal(summary.averageProteinTarget,null)
 })
 
 test('a complete logged zero remains a valid nutrition sample',()=>{

@@ -56,6 +56,10 @@ export function targetForDate(targets:GoalTarget[],logDate:string){
 }
 
 const average=(values:number[])=>values.length?values.reduce((sum,value)=>sum+value,0)/values.length:null
+const fullyCoveredAverage=(values:Array<number|null>)=>{
+ const covered=values.filter((value):value is number=>value!==null)
+ return covered.length===values.length?average(covered):null
+}
 
 const calendarDayNumber=(iso:string)=>{
  const [year,month,day]=dateParts(iso)
@@ -91,13 +95,13 @@ export function summarizePeriod(progress:PeriodProgress){
  const steps=progress.metrics.filter(day=>day.steps!==null)
  const completed=progress.workouts.filter(workout=>workout.status==='completed')
  const strengthCodes=new Set(['full_body_a','full_body_b','full_body_c','legacy_strength','custom_strength'])
- const calorieTargets=completeCalories.flatMap(day=>{
+ const calorieTargets=completeCalories.map(day=>{
   const target=targetForDate(progress.targets,day.log_date)
-  return target?[primaryCalorieTarget(target.calorie_target_min,target.calorie_target_max)]:[]
+  return target?primaryCalorieTarget(target.calorie_target_min,target.calorie_target_max):null
  })
- const proteinTargets=completeProtein.flatMap(day=>{
+ const proteinTargets=completeProtein.map(day=>{
   const target=targetForDate(progress.targets,day.log_date)
-  return target?[target.protein_target_g]:[]
+  return target?.protein_target_g??null
  })
  return {
   firstWeight:weights[0]?.weight_lbs??null,
@@ -113,8 +117,8 @@ export function summarizePeriod(progress:PeriodProgress){
   stepsLoggedDays:steps.length,
   completedWorkouts:completed.length,
   completedStrength:completed.filter(workout=>strengthCodes.has(workout.workout_code)).length,
-  averageCalorieTarget:average(calorieTargets),
-  averageProteinTarget:average(proteinTargets)
+  averageCalorieTarget:fullyCoveredAverage(calorieTargets),
+  averageProteinTarget:fullyCoveredAverage(proteinTargets)
  }
 }
 
