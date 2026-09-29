@@ -807,7 +807,7 @@ export default function Page(){
    {(['nutrition','training'] as const).map(domain=><button type="button" role="tab" aria-selected={dashboardDomain===domain} className={dashboardDomain===domain?'active':''} key={domain} onClick={()=>setDashboardDomain(domain)}>{domain[0].toUpperCase()+domain.slice(1)}</button>)}
   </div>
 
-  {dashboardDomain==='nutrition'?<>
+  <section className="dashboardDomainPanel" role="tabpanel" aria-label="Nutrition" hidden={dashboardDomain!=='nutrition'}>
 
   <div className="sectionHead">
    <div><p className="eyebrow">DAILY SIGNALS</p><h2>{isToday?'Today':selectedLabel}</h2></div>
@@ -863,7 +863,8 @@ export default function Page(){
   </section>
 
   <label className="notes"><span>Notes {saveState.notes&&<small>{saveState.notes}</small>}</span><textarea placeholder="Dinner out, hunger, workout, anything useful..." value={metrics.notes||''} onChange={event=>setMetrics(current=>({...current,notes:event.target.value}))} onBlur={()=>autosaveMetric('notes',metrics.notes)}/></label>
-  </>:<>
+  </section>
+  <section className="dashboardDomainPanel" role="tabpanel" aria-label="Training" hidden={dashboardDomain!=='training'}>
    <section className="trainingWrap">
     <p className="eyebrow">{isToday?"TODAY'S TRAINING":"PRESCRIBED TRAINING"}</p>
     {strengthSuppressed?<div className="trainingRestState"><strong>{workoutFacts?'No strength workout today':'Checking today’s training…'}</strong><span>{workoutFacts?`Next CUT365 workout: ${workoutName(nextWorkout)}`:'Reviewing completed workouts'}</span></div>:<article className="trainingCard expandedTrainingCard">
@@ -887,7 +888,7 @@ export default function Page(){
    </section>
    <section className="trainingMetrics"><Metric kind="steps" icon="↗" label="Steps" value={metrics.steps} unit="" target={`Goal · ${formatTarget(targetForDay?.steps_target,0)}+`} saveState={saveState.steps} onChange={value=>metricNumber('steps',value)} onSave={()=>autosaveMetric('steps',metrics.steps)}/></section>
    <CustomWorkoutLauncher userId={session.user.id} logDate={selectedDate} isToday={isToday} templates={customWorkoutTemplates} completedIds={completedCustomWorkoutIds} onCompleted={finishCustomWorkout} onManage={()=>openSettings('workouts')}/>
-  </>}
+  </section>
   </>:<>
    <div className="dateNavRow periodNavRow">
     <div className="dateNav" aria-label={`Select ${trackingView}`}>
