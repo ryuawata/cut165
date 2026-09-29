@@ -1,6 +1,6 @@
 import type {SupabaseClient} from '@supabase/supabase-js'
 import type {Database,Tables} from './database.types'
-import {createNutritionEntry,type MealSlot} from './nutrition.ts'
+import {createNutritionEntry,normalizeManualNutritionValues,type MealSlot} from './nutrition.ts'
 
 type TypedSupabaseClient=SupabaseClient<Database>
 type NutritionPresetRow=Tables<'nutrition_presets'>
@@ -13,7 +13,7 @@ const metrics=['calories','protein_g','carbs_g','fat_g','alcohol_servings'] as c
 
 function mealSlot(value:string|null):MealSlot|null{
  if(value===null)return null
- if(value==='breakfast'||value==='lunch'||value==='dinner'||value==='snack')return value
+ if(value==='breakfast'||value==='lunch'||value==='dinner'||value==='snack'||value==='drink')return value
  throw new Error('Choose a valid meal slot.')
 }
 
@@ -65,9 +65,9 @@ export async function deleteNutritionPreset(client:TypedSupabaseClient,userId:st
 }
 
 export async function logNutritionPreset(client:TypedSupabaseClient,userId:string,logDate:string,preset:NutritionPreset){
+ const values=normalizeManualNutritionValues(preset)
  return createNutritionEntry(client,{
   userId,logDate,entryType:'quick_add',description:preset.name,mealSlot:preset.meal_slot,
-  source:'quick_add',calories:preset.calories,protein_g:preset.protein_g,
-  carbs_g:preset.carbs_g,fat_g:preset.fat_g,alcohol_servings:preset.alcohol_servings
+  source:'quick_add',...values
  })
 }

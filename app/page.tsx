@@ -5,9 +5,11 @@ import Onboarding,{type AccountSetup} from './onboarding'
 import GoalSettings from './goal-settings'
 import NutritionPresets from './nutrition-presets'
 import WorkoutTemplateEditor from './workout-template-editor'
+import CustomWorkouts from './custom-workouts'
+import PeriodProgressView from './period-progress'
 import {supabase} from '../lib/supabase'
 import {
- emptyDailyMetrics,getDailyMetrics,saveDailyMetricField,
+ emptyDailyMetrics,getDailyMetrics,incrementMetricValue,saveDailyMetricField,
  type AutosaveDailyMetricKey,type DailyMetrics
 } from '../lib/daily-metrics'
 import {
@@ -27,7 +29,7 @@ import {
  completeProfileOnboarding,dismissGettingStarted,getProfile,hasCompleteCalculationProfile,saveCompatibilityTimezone,type Profile
 } from '../lib/profile'
 import {getActiveGoal,getCurrentGoalTarget,getEffectiveGoalTarget,type Goal,type GoalTarget} from '../lib/goals'
-import {calendarDateInTimezone,caloriePace,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms,primaryCalorieTarget} from '../lib/targets'
+import {actualWeightChange,calendarDateInTimezone,caloriePace,formatWeightValue,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms,primaryCalorieTarget} from '../lib/targets'
 import {decideAccountBootstrap,decideCompatibilityTimezone} from '../lib/account-bootstrap'
 import {
  calendarWeekBounds,nextProgramWorkout,recommendedWeeklyWorkouts,workoutName
@@ -36,9 +38,13 @@ import {
  defaultWorkoutTemplate,getWorkoutTemplates,resolveWorkoutTemplate,snapshotWorkout,
  type WorkoutTemplate
 } from '../lib/workout-templates'
+import {
+ canNavigateToPeriod,getPeriodProgress,periodBounds,shiftPeriodAnchor,
+ type PeriodProgress,type TrackingView
+} from '../lib/progress'
 
-type MealDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string}
-type EditDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string}
+type MealDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string;fat_g:string;alcohol_servings:string}
+type EditDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string;fat_g:string;alcohol_servings:string}
 
 const localISO=(date=new Date())=>{
  const year=date.getFullYear()
@@ -55,7 +61,7 @@ const shiftDate=(iso:string,days:number)=>{
  date.setDate(date.getDate()+days)
  return localISO(date)
 }
-const blankMeal=():MealDraft=>({description:'',mealSlot:'',calories:'',protein_g:'',carbs_g:''})
+const blankMeal=():MealDraft=>({description:'',mealSlot:'',calories:'',protein_g:'',carbs_g:'',fat_g:'',alcohol_servings:''})
 
 function emptyWorkoutPlan(_logDate:string):WorkoutPlan{
  return {code:'full_body_a',completed:false,session:null,strengthOpportunity:true}
@@ -66,6 +72,9 @@ function getTraining(iso:string,plan:WorkoutPlan,templates:WorkoutTemplate[]){
  const dayLabel=date.toLocaleDateString(undefined,{weekday:'short'}).toUpperCase()
  if(plan.code==='recovery')return {name:'Recovery + Movement',type:'Recovery',dayLabel,duration:'At your pace',kind:'recovery' as const}
  if(plan.code==='legacy_strength')return {name:'Legacy Strength Workout',type:'Historical strength',dayLabel,duration:'Logged workout',kind:'legacy' as const}
+ if(plan.code!=='full_body_a'&&plan.code!=='full_body_b'&&plan.code!=='full_body_c'){
+  return {name:'Custom Workout',type:'Historical custom workout',dayLabel,duration:'Logged workout',kind:'custom' as const}
+ }
  const template=resolveWorkoutTemplate({
   code:plan.code,completed:plan.completed,snapshot:plan.session?.workout_snapshot??null,templates
  })
@@ -113,6 +122,13 @@ export default function Page(){
  const selectedDateRef=useRef(selectedDate)
  const loadSequence=useRef(0)
  const workoutFactsSequence=useRef(0)
+ const periodSequence=useRef(0)
+ const waterSaveQueue=useRef<Promise<void>>(Promise.resolve())
+ const waterValueRef=useRef<number|null>(null)
+ const [trackingView,setTrackingView]=useState<TrackingView>('day')
+ const [periodAnchor,setPeriodAnchor]=useState(localISO())
+ const [periodData,setPeriodData]=useState<PeriodProgress|null>(null)
+ const [periodLoading,setPeriodLoading]=useState(false)
  const [metrics,setMetrics]=useState<DailyMetrics>(()=>emptyDailyMetrics(localISO()))
  const [measurement,setMeasurement]=useState<BodyMeasurement|null>(null)
  const [weightLbs,setWeightLbs]=useState<number|null>(null)
@@ -143,6 +159,8 @@ export default function Page(){
  const today=profile?calendarDateInTimezone(profile.timezone):localISO()
  const isToday=selectedDate===today
  const selectedLabel=localDate(selectedDate).toLocaleDateString(undefined,{month:'short',day:'numeric'})
+
+ useEffect(()=>{waterValueRef.current=metrics.water_oz},[metrics.water_oz])
 
  useEffect(()=>{
   supabase.auth.getSession().then(({data})=>{setSession(data.session);setAuthLoading(false)})
@@ -177,6 +195,16 @@ export default function Page(){
  useEffect(()=>{
   if(session&&bootstrapStatus==='dashboard-ready')void loadWeightHistory().catch(error=>setMsg(errorText(error)))
  },[session?.user.id,bootstrapStatus])
+ useEffect(()=>{
+  if(trackingView==='day'||!session||!activeGoal||bootstrapStatus!=='dashboard-ready')return
+  const sequence=++periodSequence.current
+  setPeriodLoading(true);setMsg('')
+  void getPeriodProgress(supabase,{
+   userId:session.user.id,goalId:activeGoal.id,view:trackingView,anchorDate:periodAnchor
+  }).then(data=>{if(sequence===periodSequence.current)setPeriodData(data)}).catch(error=>{
+   if(sequence===periodSequence.current)setMsg(errorText(error))
+  }).finally(()=>{if(sequence===periodSequence.current)setPeriodLoading(false)})
+ },[trackingView,periodAnchor,session?.user.id,activeGoal?.id,bootstrapStatus])
  useEffect(()=>{
   if(!session||bootstrapStatus!=='dashboard-ready')return
   void getWorkoutTemplates(supabase,session.user.id).then(setWorkoutTemplates).catch(error=>setMsg(errorText(error)))
@@ -401,8 +429,9 @@ export default function Page(){
  const weightUnit=profile?.weight_unit||'lb'
  const displayedLatest=displayWeight(latest,weightUnit)??0
  const displayedTarget=displayWeight(targetWeight,weightUnit)??0
- const displayedChange=Math.abs(displayWeight(progressData.change,weightUnit)??0)
- const changeLabel=targetWeight<startWeight?'down':targetWeight>startWeight?'up':'change'
+ const actualChange=actualWeightChange(startWeight,latest)
+ const displayedChange=Math.abs(displayWeight(actualChange.change,weightUnit)??0)
+ const changeLabel=actualChange.direction==='unchanged'?'No change':actualChange.direction
  const status=useMemo(()=>{
   if(!targetForDay||totals.entry_count===0)return ['Open','open']
   if(totals.calories_unknown_count>0||totals.protein_unknown_count>0)return ['Partial','warn']
@@ -416,7 +445,9 @@ export default function Page(){
  const strengthSuppressed=isToday&&!workoutPlan.completed&&(!workoutFacts||!workoutFacts.strengthRecommended)
 
  const metricNumber=(key:'steps'|'water_oz',value:string)=>{
-  setMetrics(current=>({...current,[key]:value===''?null:Number(value)}))
+  const next=value===''?null:Number(value)
+  if(key==='water_oz')waterValueRef.current=next
+  setMetrics(current=>({...current,[key]:next}))
  }
  const selectDate=(next:string)=>{
   if(next<=today){
@@ -437,6 +468,40 @@ export default function Page(){
  }
  const changeDate=(days:number)=>selectDate(shiftDate(selectedDate,days))
 
+ function changePeriod(amount:number){
+  if(trackingView==='day')return
+  const next=shiftPeriodAnchor(trackingView,periodAnchor,amount)
+  if(amount<0||canNavigateToPeriod(trackingView,next,today))setPeriodAnchor(next)
+ }
+
+ function openDateFromPeriod(logDate:string){
+  setTrackingView('day')
+  selectDate(logDate)
+ }
+
+ function openMealForm(){
+  setMealOpen(true)
+  requestAnimationFrame(()=>document.getElementById('one-off-entry')?.scrollIntoView({behavior:'smooth',block:'center'}))
+ }
+
+ function incrementWater(amount:number){
+  if(!session)return
+  const logDate=selectedDate
+  const next=incrementMetricValue(waterValueRef.current,amount)
+  waterValueRef.current=next
+  setMetrics(current=>({...current,water_oz:next}))
+  setSaveState(current=>({...current,water_oz:'Saving…'}))
+  waterSaveQueue.current=waterSaveQueue.current.then(async()=>{
+   const saved=await saveDailyMetricField(supabase,session.user.id,logDate,'water_oz',next)
+   if(selectedDateRef.current===logDate){
+    setMetrics(current=>({...current,id:saved.id}))
+    setSaveState(current=>({...current,water_oz:'Saved'}))
+   }
+  }).catch(error=>{
+   if(selectedDateRef.current===logDate)setSaveState(current=>({...current,water_oz:errorText(error)}))
+  })
+ }
+
  async function addMeal(event:FormEvent){
   event.preventDefault()
   if(!session||nutritionBusy)return
@@ -447,9 +512,11 @@ export default function Page(){
    const calories=parseMetric(meal.calories,'Calories')
    const protein_g=parseMetric(meal.protein_g,'Protein')
    const carbs_g=parseMetric(meal.carbs_g,'Carbs')
+   const fat_g=parseMetric(meal.fat_g,'Fat')
+   const alcohol_servings=parseMetric(meal.alcohol_servings,'Alcohol')
    const entry=await createNutritionEntry(supabase,{
     userId:session.user.id,logDate,entryType:'food',description:meal.description,
-    mealSlot:meal.mealSlot||null,source:'manual',calories,protein_g,carbs_g
+    mealSlot:meal.mealSlot||null,source:'manual',calories,protein_g,carbs_g,fat_g,alcohol_servings
    })
    setMeal(blankMeal())
    setMealOpen(false)
@@ -521,7 +588,8 @@ export default function Page(){
   setEditingId(entry.id)
   setEditDraft({
    description:entry.description,mealSlot:entry.meal_slot||'',calories:entry.calories?.toString()||'',
-   protein_g:entry.protein_g?.toString()||'',carbs_g:entry.carbs_g?.toString()||''
+   protein_g:entry.protein_g?.toString()||'',carbs_g:entry.carbs_g?.toString()||'',
+   fat_g:entry.fat_g?.toString()||'',alcohol_servings:entry.alcohol_servings?.toString()||''
   })
  }
 
@@ -535,7 +603,8 @@ export default function Page(){
    await updateNutritionEntry(supabase,session.user.id,logDate,entry.id,{
     description:editDraft.description,mealSlot:editDraft.mealSlot||null,
     calories:parseMetric(editDraft.calories,'Calories'),protein_g:parseMetric(editDraft.protein_g,'Protein'),
-    carbs_g:parseMetric(editDraft.carbs_g,'Carbs')
+    carbs_g:parseMetric(editDraft.carbs_g,'Carbs'),fat_g:parseMetric(editDraft.fat_g,'Fat'),
+    alcohol_servings:parseMetric(editDraft.alcohol_servings,'Alcohol')
    })
    await refreshNutrition(logDate)
    if(selectedDateRef.current===logDate){
@@ -653,6 +722,14 @@ export default function Page(){
    onClose={()=>setSettingsOpen(false)} onGoalSaved={finishGoalSettings} onProfileSaved={finishProfileSettings}
   />}
 
+  <div className="trackingViewTabs" role="tablist" aria-label="Tracking view">
+   {(['day','week','month'] as const).map(view=><button type="button" role="tab" aria-selected={trackingView===view} className={trackingView===view?'active':''} key={view} onClick={()=>{
+    setTrackingView(view)
+    if(view!=='day')setPeriodAnchor(selectedDate)
+   }}>{view[0].toUpperCase()+view.slice(1)}</button>)}
+  </div>
+
+  {trackingView==='day'?<>
   <div className="dateNavRow">
    <div className="dateNav" aria-label="Select log date">
     <button onClick={()=>changeDate(-1)} aria-label="Previous day">‹</button>
@@ -671,7 +748,7 @@ export default function Page(){
 
   <section className="trainingWrap">
    <p className="eyebrow">{isToday?"TODAY'S TRAINING":"PRESCRIBED TRAINING"}</p>
-   {strengthSuppressed?<div className="trainingRestState"><strong>{workoutFacts?'No strength workout today':'Checking today’s training…'}</strong><span>{workoutFacts?`Next workout: ${workoutName(nextWorkout)}`:'Reviewing completed workouts'}</span></div>:<details className="trainingCard">
+   {strengthSuppressed?<div className="trainingRestState"><strong>{workoutFacts?'No strength workout today':'Checking today’s training…'}</strong><span>{workoutFacts?`Next CUT365 workout: ${workoutName(nextWorkout)}`:'Reviewing completed workouts'}</span></div>:<details className="trainingCard">
     <summary>
      <span className="trainingTitle"><strong>{training.name}</strong><small>{training.type} <i>·</i> {training.duration}</small></span>
      <span className="trainingToggle" aria-hidden="true">+</span>
@@ -686,6 +763,7 @@ export default function Page(){
      </div>}
      {training.kind==='recovery'&&<div className="trainingNote"><strong>Goal: {formatTarget(targetForDay?.steps_target,0)}+ steps</strong><p>Recovery and everyday movement.</p></div>}
      {training.kind==='legacy'&&<div className="trainingNote"><strong>Historical strength session</strong><p>Exercise details were not recorded in the original CUT165 log.</p></div>}
+     {training.kind==='custom'&&<div className="trainingNote"><strong>Custom workout session</strong><p>This workout remains in your training history.</p></div>}
      {workoutPlan.code==='legacy_strength'
       ?<div className={`completeWorkout readOnly ${workoutPlan.completed?'done':''}`} role="status"><span>{workoutPlan.completed?'Historical workout complete':'Historical workout record'}</span><b>{workoutPlan.completed?'✓':'·'}</b></div>
       :<button className={`completeWorkout ${workoutPlan.completed?'done':''}`} onClick={toggleWorkout} disabled={workoutBusy}>
@@ -696,9 +774,11 @@ export default function Page(){
    <WorkoutTemplateEditor userId={session.user.id} templates={workoutTemplates} onChange={setWorkoutTemplates}/>
   </section>
 
+  <CustomWorkouts userId={session.user.id} logDate={selectedDate} isToday={isToday} onCompleted={()=>loadSelected(selectedDate,false)}/>
+
   <section className={`goalCard p${Math.min(4,Math.floor(progress/25)+1)}`}>
-   <div><p className="eyebrow">PROGRESS TO YOUR GOAL{activeGoal.target_date?` · ${localDate(activeGoal.target_date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}`:''}</p><div className="weightLine"><strong>{formatNumber(displayedLatest)}</strong><span>{weightUnit}</span><i>→</i><b>{formatNumber(displayedTarget)}</b><span>{weightUnit}</span></div></div>
-   <div className="goalMeta"><strong>{displayedChange.toFixed(1)} {weightUnit}</strong><span>{changeLabel}</span><strong>{progress.toFixed(0)}%</strong><span>complete</span></div>
+   <div><p className="eyebrow">PROGRESS TO YOUR GOAL{activeGoal.target_date?` · ${localDate(activeGoal.target_date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}`:''}</p><div className="weightLine"><strong>{formatWeightValue(displayedLatest)}</strong><span>{weightUnit}</span><i>→</i><b>{formatWeightValue(displayedTarget)}</b><span>{weightUnit}</span></div></div>
+   <div className="goalMeta">{changeLabel==='No change'?<><strong>No change</strong><span>from start</span></>:<><strong>{displayedChange.toFixed(1)} {weightUnit}</strong><span>{changeLabel}</span></>}<strong>{progress.toFixed(0)}%</strong><span>complete</span></div>
    <div className="bar"><i style={{width:`${progress}%`}}/></div>
   </section>
 
@@ -709,15 +789,17 @@ export default function Page(){
 
   <NutritionPresets userId={session.user.id} logDate={selectedDate} dateLabel={isToday?'today':selectedLabel} onLogged={()=>refreshNutrition(selectedDate)}/>
 
-  <section className="quickAdd oneOffMeal">
+  <section className="quickAdd oneOffMeal" id="one-off-entry">
    <details className="addMeal" open={mealOpen} onToggle={event=>setMealOpen(event.currentTarget.open)}>
-    <summary>Add one-off meal</summary>
+    <summary className="addEntryAction">+ Add entry</summary>
     <form className="mealFields" onSubmit={addMeal}>
      <label className="mealDescription"><span>Description</span><input type="text" placeholder="Dinner" value={meal.description} onChange={event=>setMeal({...meal,description:event.target.value})} required/></label>
-     <label><span>Meal</span><select value={meal.mealSlot} onChange={event=>setMeal({...meal,mealSlot:event.target.value as ''|MealSlot})}><option value="">Optional</option><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option><option value="snack">Snack</option></select></label>
-     <label><span>Calories</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="—" value={meal.calories} onChange={event=>setMeal({...meal,calories:event.target.value})}/></label>
-     <label><span>Protein</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="— g" value={meal.protein_g} onChange={event=>setMeal({...meal,protein_g:event.target.value})}/></label>
-     <label><span>Carbs</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="— g" value={meal.carbs_g} onChange={event=>setMeal({...meal,carbs_g:event.target.value})}/></label>
+     <label><span>Meal</span><select value={meal.mealSlot} onChange={event=>setMeal({...meal,mealSlot:event.target.value as ''|MealSlot})}><option value="">Optional</option><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option><option value="snack">Snack</option><option value="drink">Drink</option></select></label>
+     <label><span>Calories (kcal)</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="—" value={meal.calories} onChange={event=>setMeal({...meal,calories:event.target.value})}/></label>
+     <label><span>Protein (g)</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="—" value={meal.protein_g} onChange={event=>setMeal({...meal,protein_g:event.target.value})}/></label>
+     <label><span>Carbs (g)</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="—" value={meal.carbs_g} onChange={event=>setMeal({...meal,carbs_g:event.target.value})}/></label>
+     <label><span>Fat (g)</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="—" value={meal.fat_g} onChange={event=>setMeal({...meal,fat_g:event.target.value})}/></label>
+     <label><span>Alcohol (servings)</span><input type="number" min="0" step="any" inputMode="decimal" placeholder="—" value={meal.alcohol_servings} onChange={event=>setMeal({...meal,alcohol_servings:event.target.value})}/></label>
      <button disabled={nutritionBusy!==null}>{nutritionBusy==='meal'?'Adding…':`Add to ${isToday?'today':selectedLabel}`}</button>
     </form>
    </details>
@@ -731,23 +813,22 @@ export default function Page(){
    <NutritionMetric kind="calories" icon="◒" label="Calories" value={totals.calories} unit="kcal" target={`Goal · ${targetForDay?formatTarget(primaryCalorieTarget(targetForDay.calorie_target_min,targetForDay.calorie_target_max),0):'—'} kcal`} partial={totals.calories_unknown_count>0} loading={nutritionLoading} saveState={saveState.calories} onSave={value=>replaceTotal('calories',value)}/>
    <NutritionMetric kind="protein" icon="◆" label="Protein" value={totals.protein_g} unit="g" target={`Goal · ${formatTarget(targetForDay?.protein_target_g)}+`} partial={totals.protein_unknown_count>0} loading={nutritionLoading} saveState={saveState.protein_g} onSave={value=>replaceTotal('protein_g',value)}/>
    <Metric kind="steps" icon="↗" label="Steps" value={metrics.steps} unit="" target={`Goal · ${formatTarget(targetForDay?.steps_target,0)}+`} saveState={saveState.steps} onChange={value=>metricNumber('steps',value)} onSave={()=>autosaveMetric('steps',metrics.steps)}/>
-   <Metric kind="weight" icon="●" label="Weight" value={displayWeight(weightLbs,weightUnit)} unit={weightUnit} target={`Destination · ${formatNumber(displayedTarget)} ${weightUnit}`} step=".1" saveState={saveState.weight} onChange={value=>setWeightLbs(value===''?null:storedWeight(Number(value),weightUnit))} onSave={autosaveWeight}/>
+   <Metric kind="weight" icon="●" label="Weight" value={displayWeight(weightLbs,weightUnit)} unit={weightUnit} target={`Destination · ${formatWeightValue(displayedTarget)} ${weightUnit}`} step=".1" saveState={saveState.weight} onChange={value=>setWeightLbs(value===''?null:storedWeight(Number(value),weightUnit))} onSave={autosaveWeight}/>
   </section>
 
   <section className="softGrid">
-   <label className="softCard"><span>Water <small>Goal · {formatTarget(targetForDay?.water_target_oz)} oz/day</small></span><div><input type="number" value={metrics.water_oz??''} placeholder="0" onChange={event=>metricNumber('water_oz',event.target.value)} onBlur={()=>autosaveMetric('water_oz',metrics.water_oz)} onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur()}}/><b>/ {formatTarget(targetForDay?.water_target_oz)} oz</b></div>{saveState.water_oz&&<em className="fieldSaveState">{saveState.water_oz}</em>}</label>
+   <label className="softCard waterCard"><span>Water <small>Goal · {formatTarget(targetForDay?.water_target_oz)} oz/day</small></span><div><input type="number" value={metrics.water_oz??''} placeholder="0" onChange={event=>metricNumber('water_oz',event.target.value)} onBlur={()=>autosaveMetric('water_oz',metrics.water_oz)} onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur()}}/><b>/ {formatTarget(targetForDay?.water_target_oz)} oz</b></div><span className="waterIncrements">{[8,12,16,24].map(amount=><button type="button" key={amount} onClick={()=>incrementWater(amount)}>+{amount} oz</button>)}</span>{saveState.water_oz&&<em className="fieldSaveState">{saveState.water_oz}</em>}</label>
    <article className="softCard nutritionSoft"><span>Carbs <small>{targetForDay?.carb_target_g===null?'No fixed target':targetForDay?`Goal · ${formatTarget(targetForDay.carb_target_g)}g`:'Loading target'}</small></span><div><strong>{nutritionLoading?'—':formatNumber(totals.carbs_g)}</strong><b>g</b>{totals.carbs_unknown_count>0&&<em>partial</em>}</div></article>
   </section>
 
   <section className="nutritionEntries" aria-busy={nutritionLoading}>
-   <div className="nutritionEntriesHead"><div><p className="eyebrow">NUTRITION ENTRIES</p><h3>{isToday?'Today':selectedLabel}</h3></div><span>{entries.length} {entries.length===1?'entry':'entries'}</span></div>
+   <div className="nutritionEntriesHead"><div><p className="eyebrow">NUTRITION ENTRIES</p><h3>{isToday?'Today':selectedLabel}</h3></div><div><span>{entries.length} {entries.length===1?'entry':'entries'}</span><button type="button" className="listAddEntry" onClick={openMealForm}>+ Add entry</button></div></div>
    {nutritionLoading&&<p className="entryEmpty">Loading nutrition…</p>}
    {!nutritionLoading&&!entries.length&&<p className="entryEmpty">No nutrition logged for this day yet.</p>}
    {!nutritionLoading&&entries.map(entry=>editingId===entry.id&&editDraft?
     <form className="entryEdit" key={entry.id} onSubmit={event=>saveEntryEdit(event,entry)}>
-     <div className="entryEditTop"><input type="text" value={editDraft.description} onChange={event=>setEditDraft({...editDraft,description:event.target.value})} aria-label="Description" required/><select value={editDraft.mealSlot} onChange={event=>setEditDraft({...editDraft,mealSlot:event.target.value as ''|MealSlot})} aria-label="Meal slot"><option value="">No meal slot</option><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option><option value="snack">Snack</option></select></div>
-     <div className="entryEditMetrics"><label>Calories<input type="number" min="0" step="any" value={editDraft.calories} onChange={event=>setEditDraft({...editDraft,calories:event.target.value})}/></label><label>Protein<input type="number" min="0" step="any" value={editDraft.protein_g} onChange={event=>setEditDraft({...editDraft,protein_g:event.target.value})}/></label><label>Carbs<input type="number" min="0" step="any" value={editDraft.carbs_g} onChange={event=>setEditDraft({...editDraft,carbs_g:event.target.value})}/></label></div>
-     {entry.alcohol_servings!==null&&entry.alcohol_servings>0&&<small>Alcohol servings remain {formatNumber(entry.alcohol_servings,2)}.</small>}
+     <div className="entryEditTop"><input type="text" value={editDraft.description} onChange={event=>setEditDraft({...editDraft,description:event.target.value})} aria-label="Description" required/><select value={editDraft.mealSlot} onChange={event=>setEditDraft({...editDraft,mealSlot:event.target.value as ''|MealSlot})} aria-label="Meal slot"><option value="">No meal slot</option><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option><option value="snack">Snack</option><option value="drink">Drink</option></select></div>
+     <div className="entryEditMetrics"><label>Calories<input type="number" min="0" step="any" value={editDraft.calories} onChange={event=>setEditDraft({...editDraft,calories:event.target.value})}/></label><label>Protein<input type="number" min="0" step="any" value={editDraft.protein_g} onChange={event=>setEditDraft({...editDraft,protein_g:event.target.value})}/></label><label>Carbs<input type="number" min="0" step="any" value={editDraft.carbs_g} onChange={event=>setEditDraft({...editDraft,carbs_g:event.target.value})}/></label><label>Fat<input type="number" min="0" step="any" value={editDraft.fat_g} onChange={event=>setEditDraft({...editDraft,fat_g:event.target.value})}/></label><label>Alcohol<input type="number" min="0" step="any" value={editDraft.alcohol_servings} onChange={event=>setEditDraft({...editDraft,alcohol_servings:event.target.value})}/></label></div>
      <div className="entryActions"><button disabled={nutritionBusy!==null}>{nutritionBusy===`edit:${entry.id}`?'Saving…':'Save entry'}</button><button type="button" className="quiet" onClick={()=>{setEditingId(null);setEditDraft(null)}} disabled={nutritionBusy!==null}>Cancel</button><button type="button" className="delete" onClick={()=>removeEntry(entry)} disabled={nutritionBusy!==null}>Delete</button></div>
     </form>
     :<article className="entryRow" key={entry.id}>
@@ -757,6 +838,18 @@ export default function Page(){
   </section>
 
   <label className="notes"><span>Notes {saveState.notes&&<small>{saveState.notes}</small>}</span><textarea placeholder="Dinner out, hunger, workout, anything useful..." value={metrics.notes||''} onChange={event=>setMetrics(current=>({...current,notes:event.target.value}))} onBlur={()=>autosaveMetric('notes',metrics.notes)}/></label>
+  </>:<>
+   <div className="dateNavRow periodNavRow">
+    <div className="dateNav" aria-label={`Select ${trackingView}`}>
+     <button onClick={()=>changePeriod(-1)} aria-label={`Previous ${trackingView}`}>‹</button>
+     <strong>{periodBounds(trackingView,periodAnchor).start.toUpperCase()} <i>·</i> {trackingView.toUpperCase()}</strong>
+     <button onClick={()=>changePeriod(1)} disabled={!canNavigateToPeriod(trackingView,shiftPeriodAnchor(trackingView,periodAnchor,1),today)} aria-label={`Next ${trackingView}`}>›</button>
+    </div>
+    {periodBounds(trackingView,periodAnchor).start!==periodBounds(trackingView,today).start&&<button className="todayButton" onClick={()=>setPeriodAnchor(today)}>Current</button>}
+   </div>
+   {periodLoading&&<p className="periodLoading">Loading progress…</p>}
+   {!periodLoading&&periodData&&<PeriodProgressView view={trackingView} data={periodData} weightUnit={weightUnit} onDate={openDateFromPeriod}/>}
+  </>}
  </main>
 }
 

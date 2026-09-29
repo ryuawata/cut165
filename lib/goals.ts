@@ -130,3 +130,15 @@ export async function getCurrentGoalTarget(
 ){
  return getEffectiveGoalTarget(client,userId,goalId,currentDate)
 }
+
+export async function getGoalTargetsForRange(
+ client:TypedSupabaseClient,userId:string,goalId:string,startDate:string,endExclusive:string
+){
+ const {data,error}=await client.from('goal_targets').select()
+  .eq('user_id',userId).eq('goal_id',goalId)
+  .lt('effective_from',endExclusive)
+  .or(`effective_to.is.null,effective_to.gt.${startDate}`)
+  .order('effective_from',{ascending:true})
+ if(error)throw error
+ return (data??[]).map(normalizeTarget)
+}

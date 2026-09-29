@@ -98,7 +98,7 @@ test('calendar weeks use local Monday through Sunday boundaries',()=>{
  })
 })
 
-function coachingClient(options:{sequenceCode:'full_body_a'|'full_body_b'|'full_body_c'|null;strengthCode:'full_body_a'|'full_body_b'|'full_body_c'|'legacy_strength'|null;strengthDate:string|null;weekCount:number}){
+function coachingClient(options:{sequenceCode:'full_body_a'|'full_body_b'|'full_body_c'|null;strengthCode:'full_body_a'|'full_body_b'|'full_body_c'|'legacy_strength'|'custom_strength'|null;strengthDate:string|null;weekCount:number}){
  const filters:Array<[number,string,string,unknown]>=[]
  let queryIndex=0
  type QueryResult={data:Array<{id:string}>;error:null}
@@ -157,8 +157,8 @@ test('workout coaching separates A/B/C sequence from all-strength cadence histor
   filters.filter(([,operator,column])=>operator==='in'&&column==='workout_code').map(([, , ,value])=>value),
   [
    ['full_body_a','full_body_b','full_body_c'],
-   ['full_body_a','full_body_b','full_body_c','legacy_strength'],
-   ['full_body_a','full_body_b','full_body_c','legacy_strength']
+   ['full_body_a','full_body_b','full_body_c','legacy_strength','custom_strength'],
+   ['full_body_a','full_body_b','full_body_c','legacy_strength','custom_strength']
   ]
  )
  assert.ok(filters.some(([,operator,column,value])=>operator==='gte'&&column==='scheduled_date'&&value==='2026-09-14'))
@@ -182,6 +182,15 @@ test('completed legacy strength blocks next-day strength without advancing A/B/C
   assert.equal(nextProgramWorkout(facts.lastCompleted),'full_body_b')
   assert.equal(facts.lastCompletedDate,'2026-09-21')
   assert.equal(facts.strengthRecommended,false)
+})
+
+test('custom strength affects cadence without advancing A/B/C',async()=>{
+ const {client}=coachingClient({sequenceCode:'full_body_a',strengthCode:'custom_strength',strengthDate:'2026-09-21',weekCount:2})
+ const facts=await getWorkoutCoachingFacts(client,'user-123','2026-09-21','2026-09-28','2026-09-22',3)
+ assert.equal(facts.lastCompleted,'full_body_a')
+ assert.equal(nextProgramWorkout(facts.lastCompleted),'full_body_b')
+ assert.equal(facts.completedThisWeek,2)
+ assert.equal(facts.strengthRecommended,false)
 })
 
 test('weekly strength count includes completed non-A/B strength sessions',async()=>{

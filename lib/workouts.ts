@@ -10,7 +10,8 @@ type TypedSupabaseClient=SupabaseClient<Database>
 
 export type StructuredWorkoutCode='full_body_a'|'full_body_b'|'full_body_c'
 export type HistoricalWorkoutCode='legacy_strength'
-export type WorkoutCode=StructuredWorkoutCode|'recovery'|HistoricalWorkoutCode
+export type CustomWorkoutCode='custom_strength'|'custom_cardio'|'custom_mobility'|'custom_other'
+export type WorkoutCode=StructuredWorkoutCode|'recovery'|'custom'|HistoricalWorkoutCode|CustomWorkoutCode
 export type WorkoutStatus='planned'|'completed'|'skipped'
 export type WorkoutSource='manual'|'schedule'|'legacy'|'ai'
 
@@ -28,7 +29,8 @@ export type WorkoutPlan={
 }
 
 const sequenceCodes:StructuredWorkoutCode[]=['full_body_a','full_body_b','full_body_c']
-const strengthCodes:WorkoutCode[]=['full_body_a','full_body_b','full_body_c','legacy_strength']
+const strengthCodes:WorkoutCode[]=['full_body_a','full_body_b','full_body_c','legacy_strength','custom_strength']
+const programDisplayCodes:WorkoutCode[]=['full_body_a','full_body_b','full_body_c','recovery','legacy_strength']
 
 function normalizeStructuredCode(value:string):StructuredWorkoutCode{
  if(value==='full_body_a'||value==='full_body_b'||value==='full_body_c')return value
@@ -36,7 +38,7 @@ function normalizeStructuredCode(value:string):StructuredWorkoutCode{
 }
 
 function normalizeCode(value:string):WorkoutCode{
- if(value==='recovery'||value==='legacy_strength')return value
+ if(value==='recovery'||value==='legacy_strength'||value==='custom'||value==='custom_strength'||value==='custom_cardio'||value==='custom_mobility'||value==='custom_other')return value
  return normalizeStructuredCode(value)
 }
 
@@ -71,6 +73,7 @@ export async function getWorkoutPlan(
  const [selectedResult,previousResult]=await Promise.all([
   client.from('workout_sessions').select()
    .eq('user_id',userId).eq('scheduled_date',logDate)
+   .in('workout_code',programDisplayCodes)
    .order('created_at',{ascending:false}).limit(1).maybeSingle(),
   client.from('workout_sessions').select('workout_code')
    .eq('user_id',userId).eq('status','completed').in('workout_code',sequenceCodes)
@@ -84,6 +87,14 @@ export async function getWorkoutPlan(
  const previous=previousResult.data?normalizeStructuredCode(previousResult.data.workout_code):null
  const code=session?.workout_code||nextStructuredWorkout(previous)
  return {code,completed:session?.status==='completed',session,strengthOpportunity:code!=='recovery'}
+}
+
+export async function getWorkoutSessionsRange(client:TypedSupabaseClient,userId:string,startDate:string,endExclusive:string){
+ const {data,error}=await client.from('workout_sessions').select()
+  .eq('user_id',userId).gte('scheduled_date',startDate).lt('scheduled_date',endExclusive)
+  .order('scheduled_date',{ascending:true}).order('created_at',{ascending:true})
+ if(error)throw error
+ return (data??[]).map(normalizeSession)
 }
 
 export async function getWorkoutCoachingFacts(

@@ -15,6 +15,7 @@
 .nutritionEntriesHead .eyebrow{margin-bottom:4px}
 .nutritionEntriesHead h3{margin:0;font-size:22px;letter-spacing:-.7px}
 .nutritionEntriesHead>span{font-size:11px;color:#888}
+.nutritionEntriesHead>div:last-child{display:grid;justify-items:end;gap:7px}.nutritionEntriesHead>div:last-child>span{font-size:10px;color:#888}.listAddEntry{border:1px solid var(--line);border-radius:10px;background:#fff;padding:8px 10px;font-size:11px;font-weight:600;cursor:pointer}
 .entryEmpty{margin:0;border-top:1px solid var(--line);padding:20px 0 4px;font-size:12px;color:#888}
 .entryRow{display:flex;align-items:center;justify-content:space-between;gap:18px;border-top:1px solid var(--line);padding:14px 0}
 .entryRow>div:first-child{min-width:0;display:grid;gap:3px}
@@ -34,6 +35,7 @@
 .entryActions button{border:0;border-radius:9px;background:#171717;color:#fff;padding:8px 11px;font-size:10px;font-weight:600;cursor:pointer}
 .entryActions .quiet{background:#f1f1ee;color:#555}
 .entryActions .delete{margin-left:auto;background:#fff0ed;color:#9b3f31}
+.mealFields{grid-template-columns:repeat(3,minmax(90px,1fr))}.mealFields button{grid-column:1/-1}.entryEditMetrics{grid-template-columns:repeat(5,1fr)}
 
 @media(max-width:650px){
  .nutritionMetric .metricValue strong{font-size:39px}
@@ -43,6 +45,7 @@
  .entryRow{align-items:flex-start}
  .entryRowActions{display:grid}
  .entryEditTop{grid-template-columns:1fr}
+ .entryEditMetrics{grid-template-columns:1fr 1fr}
  .nutritionEntries{padding:18px}
  .nutritionEntriesHead{align-items:center}
  .presetQuickAdd{padding:17px}.presetRail{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:4px}.presetCard{min-width:210px;scroll-snap-align:start}.presetHead{align-items:center}.presetHead>button{padding:9px 11px}

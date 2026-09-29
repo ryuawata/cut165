@@ -56,6 +56,51 @@ export type Database = {
         }
         Relationships: []
       }
+      custom_workout_templates: {
+        Row: {
+          category: string
+          created_at: string
+          description: string | null
+          duration_minutes: number | null
+          exercises: Json
+          external_url: string | null
+          format: string
+          id: string
+          name: string
+          sort_order: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          description?: string | null
+          duration_minutes?: number | null
+          exercises?: Json
+          external_url?: string | null
+          format: string
+          id?: string
+          name: string
+          sort_order?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          description?: string | null
+          duration_minutes?: number | null
+          exercises?: Json
+          external_url?: string | null
+          format?: string
+          id?: string
+          name?: string
+          sort_order?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       daily_logs: {
         Row: {
           alcohol_drinks: number
@@ -503,6 +548,7 @@ export type Database = {
         Row: {
           completed_at: string | null
           created_at: string
+          custom_workout_template_id: string | null
           duration_minutes: number | null
           id: string
           notes: string | null
@@ -518,6 +564,7 @@ export type Database = {
         Insert: {
           completed_at?: string | null
           created_at?: string
+          custom_workout_template_id?: string | null
           duration_minutes?: number | null
           id?: string
           notes?: string | null
@@ -533,6 +580,7 @@ export type Database = {
         Update: {
           completed_at?: string | null
           created_at?: string
+          custom_workout_template_id?: string | null
           duration_minutes?: number | null
           id?: string
           notes?: string | null
@@ -545,7 +593,15 @@ export type Database = {
           workout_code?: string
           workout_snapshot?: Json | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "workout_sessions_custom_template_owner_fkey"
+            columns: ["custom_workout_template_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "custom_workout_templates"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
       }
     }
     Views: {

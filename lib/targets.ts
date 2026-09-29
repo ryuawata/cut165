@@ -157,6 +157,19 @@ export function goalProgress(startWeightLbs:number,targetWeightLbs:number,curren
  return {raw,visual:clamp(raw,0,100),change:currentWeightLbs-startWeightLbs}
 }
 
+export function actualWeightChange(startWeight:number,currentWeight:number){
+ const change=currentWeight-startWeight
+ return {
+  change,
+  magnitude:Math.abs(change),
+  direction:change<0?'down' as const:change>0?'up' as const:'unchanged' as const
+ }
+}
+
+export const formatWeightValue=(value:number)=>value.toLocaleString(undefined,{
+ minimumFractionDigits:1,maximumFractionDigits:2
+})
+
 export const poundsToKilograms=(pounds:number)=>pounds*.45359237
 export const kilogramsToPounds=(kilograms:number)=>kilograms/.45359237
 

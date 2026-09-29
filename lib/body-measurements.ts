@@ -23,6 +23,14 @@ export async function getRecentWeights(client:TypedSupabaseClient,userId:string,
  return data
 }
 
+export async function getBodyMeasurementsRange(client:TypedSupabaseClient,userId:string,startDate:string,endExclusive:string){
+ const {data,error}=await client.from('body_measurements').select()
+  .eq('user_id',userId).gte('log_date',startDate).lt('log_date',endExclusive)
+  .order('log_date',{ascending:true})
+ if(error)throw error
+ return data??[]
+}
+
 export async function saveBodyWeight(client:TypedSupabaseClient,input:{
  userId:string
  logDate:string

@@ -1,7 +1,7 @@
 import type {SupabaseClient} from '@supabase/supabase-js'
 import type {Database,Tables} from './database.types'
 
-export type MealSlot='breakfast'|'lunch'|'dinner'|'snack'
+export type MealSlot='breakfast'|'lunch'|'dinner'|'snack'|'drink'
 export type NutritionEntryType='food'|'drink'|'supplement'|'quick_add'|'legacy'|'adjustment'
 export type NutritionSource='manual'|'quick_add'|'legacy'|'ai'|'import'
 
@@ -53,6 +53,8 @@ export type UpdateNutritionEntryInput={
  calories:number|null
  protein_g:number|null
  carbs_g:number|null
+ fat_g:number|null
+ alcohol_servings:number|null
 }
 
 const entryColumns='id,user_id,log_date,consumed_at,entry_type,meal_slot,description,calories,protein_g,carbs_g,fat_g,alcohol_servings,source,source_ref,created_at,updated_at'
@@ -66,9 +68,9 @@ function normalizeEntryType(value:string):NutritionEntryType{
  throw new Error(`Unsupported nutrition entry type: ${value}`)
 }
 
-function normalizeMealSlot(value:string|null):MealSlot|null{
+export function normalizeMealSlot(value:string|null):MealSlot|null{
  if(value===null)return null
- if(value==='breakfast'||value==='lunch'||value==='dinner'||value==='snack')return value
+ if(value==='breakfast'||value==='lunch'||value==='dinner'||value==='snack'||value==='drink')return value
  throw new Error(`Unsupported meal slot: ${value}`)
 }
 
@@ -116,6 +118,17 @@ function hasMetric(values:NutritionValues){
   .some(value=>value!==null&&value!==undefined)
 }
 
+export function normalizeManualNutritionValues(values:NutritionValues){
+ if(!hasMetric(values))throw new Error('Add at least one nutrition value.')
+ return {
+  calories:values.calories??0,
+  protein_g:values.protein_g??0,
+  carbs_g:values.carbs_g??0,
+  fat_g:values.fat_g??0,
+  alcohol_servings:values.alcohol_servings??0
+ }
+}
+
 function validateMetrics(values:NutritionValues,allowSigned=false){
  for(const value of [values.calories,values.protein_g,values.carbs_g,values.fat_g,values.alcohol_servings]){
   if(value!==null&&value!==undefined&&(!Number.isFinite(value)||(!allowSigned&&value<0))){
@@ -155,15 +168,26 @@ export async function getDailyNutritionTotals(client:TypedSupabaseClient,userId:
  return normalizeTotals(data,logDate)
 }
 
+export async function getNutritionTotalsRange(client:TypedSupabaseClient,userId:string,startDate:string,endExclusive:string){
+ const {data,error}=await client.from('daily_nutrition_totals').select(totalsColumns)
+  .eq('user_id',userId).gte('log_date',startDate).lt('log_date',endExclusive)
+  .order('log_date',{ascending:true})
+ if(error)throw error
+ return (data??[]).map(row=>normalizeTotals(row,row.log_date??startDate))
+}
+
 export async function createNutritionEntry(client:TypedSupabaseClient,input:CreateNutritionEntryInput){
  const description=requireDescription(input.description)
  validateCreateInput(input)
+ const metrics=input.source==='manual'&&input.entryType!=='adjustment'
+  ?normalizeManualNutritionValues(input)
+  :input
  const {data,error}=await client.from('nutrition_entries').insert({
   user_id:input.userId,log_date:input.logDate,consumed_at:input.consumedAt??null,
   entry_type:input.entryType,meal_slot:input.mealSlot??null,description,
-  calories:input.calories??null,protein_g:input.protein_g??null,
-  carbs_g:input.carbs_g??null,fat_g:input.fat_g??null,
-  alcohol_servings:input.alcohol_servings??null,source:input.source,
+  calories:metrics.calories??null,protein_g:metrics.protein_g??null,
+  carbs_g:metrics.carbs_g??null,fat_g:metrics.fat_g??null,
+  alcohol_servings:metrics.alcohol_servings??null,source:input.source,
   source_ref:input.sourceRef??null
  }).select(entryColumns).single()
  if(error)throw error
@@ -180,10 +204,15 @@ export async function updateNutritionEntry(
  if(normalizeEntry(existing).entry_type==='adjustment'){
   throw new Error('Daily corrections can be reverted, but not edited as food entries.')
  }
- validateMetrics({...normalizeEntry(existing),...input})
+ const existingEntry=normalizeEntry(existing)
+ validateMetrics({...existingEntry,...input})
+ const metrics=existingEntry.source==='manual'
+  ?normalizeManualNutritionValues(input)
+  :input
  const {data,error}=await client.from('nutrition_entries').update({
-  description,meal_slot:input.mealSlot,calories:input.calories,
-  protein_g:input.protein_g,carbs_g:input.carbs_g
+  description,meal_slot:input.mealSlot,calories:metrics.calories,
+  protein_g:metrics.protein_g,carbs_g:metrics.carbs_g,
+  fat_g:metrics.fat_g,alcohol_servings:metrics.alcohol_servings
  }).eq('id',entryId).eq('user_id',userId).eq('log_date',logDate).select(entryColumns).single()
  if(error)throw error
  return normalizeEntry(data)

@@ -52,6 +52,20 @@ export async function getDailyMetrics(client:TypedSupabaseClient,userId:string,l
  return data?normalizeRow(data):emptyDailyMetrics(logDate)
 }
 
+export async function getDailyMetricsRange(client:TypedSupabaseClient,userId:string,startDate:string,endExclusive:string){
+ const {data,error}=await client.from('daily_metrics')
+  .select('id,log_date,steps,water_oz,cardio_minutes,notes')
+  .eq('user_id',userId).gte('log_date',startDate).lt('log_date',endExclusive)
+  .order('log_date',{ascending:true})
+ if(error)throw error
+ return (data??[]).map(normalizeRow)
+}
+
+export function incrementMetricValue(current:number|null,amount:number){
+ if(!Number.isFinite(amount)||amount<=0)throw new Error('Increment must be greater than zero.')
+ return (current??0)+amount
+}
+
 export async function saveDailyMetrics(
  client:TypedSupabaseClient,userId:string,metrics:DailyMetrics
 ){
