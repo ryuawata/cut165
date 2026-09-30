@@ -11,7 +11,7 @@ const presets=readFileSync(new URL('../app/nutrition-presets.tsx',import.meta.ur
 const productCss=readFileSync(new URL('../app/product.css',import.meta.url),'utf8')
 
 test('date navigation precedes range navigation and Nutrition is the default domain',()=>{
- assert.ok(page.indexOf('className="dateNavRow"')<page.indexOf('className="trackingViewTabs"'))
+ assert.ok(page.indexOf('className="dateNavRow"')<page.indexOf('className="trackingViewTabs desktopTrackingTabs"'))
  assert.match(page,/useState<DashboardDomain>\(['"]nutrition['"]\)/)
  assert.match(page,/aria-label="Dashboard domain"/)
  assert.match(page,/\(\['nutrition','training'\] as const\)/)
@@ -21,11 +21,11 @@ test('date navigation precedes range navigation and Nutrition is the default dom
 
 test('day domains stay mounted, hide the inactive panel, and keep daily measurements shared',()=>{
  const dailyMetrics=page.indexOf('className="dailyMetrics"')
- const domainTabs=page.indexOf('className="domainTabs"')
- const split=page.indexOf('className="dashboardDomainPanel"')
+ const domainTabs=page.indexOf('className="domainTabs dayDomainTabs"')
+ const split=page.indexOf('className="dashboardDomainPanel nutritionDomainPanel"')
  assert.ok(domainTabs>0&&domainTabs<dailyMetrics&&dailyMetrics<split)
- assert.match(page,/aria-label="Nutrition" hidden=\{dashboardDomain!==['"]nutrition['"]\}[\s\S]*NutritionMetric[\s\S]*NutritionPresets[\s\S]*nutritionEntries/)
- assert.match(page,/aria-label="Training" hidden=\{dashboardDomain!==['"]training['"]\}[\s\S]*className="trainingWrap"[\s\S]*CustomWorkoutLauncher/)
+ assert.match(page,/aria-label="Nutrition" hidden=\{!nutritionVisible\}[\s\S]*NutritionMetric[\s\S]*NutritionPresets[\s\S]*nutritionEntries/)
+ assert.match(page,/aria-label="Training" hidden=\{!trainingVisible\}[\s\S]*className="trainingWrap"[\s\S]*CustomWorkoutLauncher/)
  assert.equal((page.match(/<NutritionPresets/g)??[]).length,1)
  assert.doesNotMatch(page,/dashboardDomain==='nutrition'\?<|dashboardDomain==='training'\?</)
  assert.match(presets,/const \[draft,setDraft\]=useState<Draft>\(blank\)/)
@@ -69,7 +69,7 @@ test('period domains split nutrition from training and drilldown preserves domai
 })
 
 test('Weight and Steps are compact shared daily measurements after the domain switch',()=>{
- assert.match(page,/className="domainTabs"[\s\S]*className="dailyMetrics"[\s\S]*<Metric kind="weight"[\s\S]*<Metric kind="steps"/)
+ assert.match(page,/className="domainTabs dayDomainTabs"[\s\S]*className="dailyMetrics"[\s\S]*<Metric kind="weight"[\s\S]*<Metric kind="steps"/)
  assert.match(page,/className=\{`metric dailyMetric \$\{kind\}`\}/)
  assert.match(productCss,/\.dailyMetrics\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/)
  assert.match(productCss,/\.dailyMetric\{display:block;width:100%;min-height:112px/)

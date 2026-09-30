@@ -20,7 +20,7 @@ const displayedWeight=(pounds:number,unit:Profile['weight_unit'])=>unit==='kg'?p
 
 export type SettingsSection='goal'|'profile'|'workouts'
 
-export default function GoalSettings({session,profile,goal,target,currentWeightLbs,initialSection='goal',workoutTemplates,customWorkoutTemplates,onClose,onGoalSaved,onProfileSaved,onWorkoutTemplatesChange,onCustomWorkoutTemplatesChange}:{
+export default function GoalSettings({session,profile,goal,target,currentWeightLbs,initialSection='goal',workoutTemplates,customWorkoutTemplates,onClose,onSignOut,onGoalSaved,onProfileSaved,onWorkoutTemplatesChange,onCustomWorkoutTemplatesChange}:{
  session:Session
  profile:Profile
  goal:Goal
@@ -30,6 +30,7 @@ export default function GoalSettings({session,profile,goal,target,currentWeightL
  workoutTemplates:WorkoutTemplate[]
  customWorkoutTemplates:CustomWorkoutTemplate[]
  onClose:()=>void
+ onSignOut:()=>void
  onGoalSaved:(goal:Goal,target:GoalTarget)=>void
  onProfileSaved:(profile:Profile)=>void
  onWorkoutTemplatesChange:(templates:WorkoutTemplate[])=>void
@@ -153,6 +154,7 @@ export default function GoalSettings({session,profile,goal,target,currentWeightL
     {error&&<p className="formError" role="alert">{error}</p>}
     <button className="primaryAction" disabled={busy||!calculationProfileReady}>{busy?'Saving…':'Save goal'} <b>→</b></button>
    </form>}
+   <div className="settingsAccount"><span>Account</span><button type="button" onClick={onSignOut}>Sign out</button></div>
   </section>
  </div>
 }

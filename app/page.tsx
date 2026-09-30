@@ -49,6 +49,7 @@ import {
 type MealDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string;fat_g:string;alcohol_servings:string}
 type EditDraft={description:string;mealSlot:''|MealSlot;calories:string;protein_g:string;carbs_g:string;fat_g:string;alcohol_servings:string}
 type DashboardDomain='nutrition'|'training'
+type MobileDestination='today'|'progress'|'training'|'profile'
 const mealGroupOrder=['breakfast','lunch','dinner','snack','drink','other'] as const
 
 const localISO=(date=new Date())=>{
@@ -67,6 +68,7 @@ const shiftDate=(iso:string,days:number)=>{
  return localISO(date)
 }
 const blankMeal=():MealDraft=>({description:'',mealSlot:'',calories:'',protein_g:'',carbs_g:'',fat_g:'',alcohol_servings:''})
+const mealIsBlank=(draft:MealDraft)=>Object.values(draft).every(value=>value==='')
 
 function emptyWorkoutPlan(_logDate:string):WorkoutPlan{
  return {code:'full_body_a',completed:false,session:null,strengthOpportunity:true}
@@ -133,6 +135,11 @@ export default function Page(){
  const waterValueRef=useRef<number|null>(null)
  const [trackingView,setTrackingView]=useState<TrackingView>('day')
  const [dashboardDomain,setDashboardDomain]=useState<DashboardDomain>('nutrition')
+ const [isMobile,setIsMobile]=useState(false)
+ const [mobileDestination,setMobileDestination]=useState<MobileDestination>('today')
+ const [mobileProgressView,setMobileProgressView]=useState<'week'|'month'>('week')
+ const [logSheetOpen,setLogSheetOpen]=useState(false)
+ const logCloseRef=useRef<HTMLButtonElement>(null)
  const [periodAnchor,setPeriodAnchor]=useState(localISO())
  const [periodData,setPeriodData]=useState<PeriodProgress|null>(null)
  const [periodLoading,setPeriodLoading]=useState(false)
@@ -159,6 +166,15 @@ export default function Page(){
  const [editingId,setEditingId]=useState<string|null>(null)
  const [editDraft,setEditDraft]=useState<EditDraft|null>(null)
  const [saveState,setSaveState]=useState<Record<string,string>>({})
+ const activePeriodView:Exclude<TrackingView,'day'>=isMobile
+  ?mobileProgressView
+  :trackingView==='day'?'week':trackingView
+ const periodVisible=isMobile?mobileDestination==='progress':trackingView!=='day'
+ const dayVisible=isMobile
+  ?mobileDestination==='today'||mobileDestination==='training'
+  :trackingView==='day'
+ const nutritionVisible=isMobile?mobileDestination==='today':dashboardDomain==='nutrition'
+ const trainingVisible=isMobile?mobileDestination==='training':dashboardDomain==='training'
  const training=getTraining(selectedDate,workoutPlan,workoutTemplates)
  const today=profile?calendarDateInTimezone(profile.timezone):localISO()
  const isToday=selectedDate===today
@@ -189,6 +205,23 @@ export default function Page(){
  },[])
 
  useEffect(()=>{waterValueRef.current=metrics.water_oz},[metrics.water_oz])
+
+ useEffect(()=>{
+  const query=window.matchMedia('(max-width: 650px)')
+  const sync=()=>setIsMobile(query.matches)
+  sync()
+  query.addEventListener('change',sync)
+  return()=>query.removeEventListener('change',sync)
+ },[])
+
+ useEffect(()=>{
+  if(!logSheetOpen)return
+  const previous=document.activeElement instanceof HTMLElement?document.activeElement:null
+  const onKeyDown=(event:KeyboardEvent)=>{if(event.key==='Escape')setLogSheetOpen(false)}
+  document.addEventListener('keydown',onKeyDown)
+  requestAnimationFrame(()=>logCloseRef.current?.focus())
+  return()=>{document.removeEventListener('keydown',onKeyDown);previous?.focus()}
+ },[logSheetOpen])
 
  useEffect(()=>{
   supabase.auth.getSession().then(({data})=>{setSession(data.session);setAuthLoading(false)})
@@ -224,9 +257,9 @@ export default function Page(){
   if(session&&bootstrapStatus==='dashboard-ready')void loadWeightHistory().catch(error=>setMsg(errorText(error)))
  },[session?.user.id,bootstrapStatus])
  useEffect(()=>{
-  if(trackingView==='day'||!session||!activeGoal||bootstrapStatus!=='dashboard-ready')return
-  void refreshPeriod(trackingView,periodAnchor,session.user.id,activeGoal.id)
- },[trackingView,periodAnchor,session?.user.id,activeGoal?.id,bootstrapStatus,refreshPeriod])
+  if(!periodVisible||!session||!activeGoal||bootstrapStatus!=='dashboard-ready')return
+  void refreshPeriod(activePeriodView,periodAnchor,session.user.id,activeGoal.id)
+ },[periodVisible,activePeriodView,periodAnchor,session?.user.id,activeGoal?.id,bootstrapStatus,refreshPeriod])
  useEffect(()=>{
   if(!session||bootstrapStatus!=='dashboard-ready')return
   void Promise.all([
@@ -490,13 +523,13 @@ export default function Page(){
  const changeDate=(days:number)=>selectDate(shiftDate(selectedDate,days))
 
  function changePeriod(amount:number){
-  if(trackingView==='day')return
-  const next=shiftPeriodAnchor(trackingView,periodAnchor,amount)
-  if(amount<0||canNavigateToPeriod(trackingView,next,today))setPeriodAnchor(next)
+  const next=shiftPeriodAnchor(activePeriodView,periodAnchor,amount)
+  if(amount<0||canNavigateToPeriod(activePeriodView,next,today))setPeriodAnchor(next)
  }
 
  function openDateFromPeriod(logDate:string){
   setTrackingView('day')
+  setMobileDestination('today')
   selectDate(logDate)
  }
 
@@ -505,14 +538,51 @@ export default function Page(){
   setSettingsOpen(true)
  }
 
+ function closeSettings(){
+  setSettingsOpen(false)
+  if(isMobile&&mobileDestination==='profile')setMobileDestination('today')
+ }
+
+ function chooseMobileDestination(destination:Exclude<MobileDestination,'profile'>){
+  setSettingsOpen(false)
+  setLogSheetOpen(false)
+  setMobileDestination(destination)
+ }
+
+ function openMobileProfile(){
+  setLogSheetOpen(false)
+  setMobileDestination('profile')
+  openSettings('profile')
+ }
+
  async function finishCustomWorkout(templateId:string){
   setCompletedCustomWorkoutIds(current=>new Set(current).add(templateId))
   await loadSelected(selectedDate,false)
  }
 
- function openMealForm(){
+ function scrollToControl(selector:string){
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+   const element=document.querySelector<HTMLElement>(selector)
+   element?.scrollIntoView({behavior:'smooth',block:'center'})
+   element?.focus({preventScroll:true})
+  }))
+ }
+
+ function openMealForm(mealSlot?:'drink'){
+  if(mealSlot)setMeal(current=>mealIsBlank(current)?{...current,mealSlot}:current)
+  chooseMobileDestination('today')
   setMealOpen(true)
-  requestAnimationFrame(()=>document.getElementById('one-off-entry')?.scrollIntoView({behavior:'smooth',block:'center'}))
+  scrollToControl('#one-off-entry input')
+ }
+
+ function openWaterLog(){
+  chooseMobileDestination('today')
+  scrollToControl('.waterCard input')
+ }
+
+ function openWeightLog(){
+  chooseMobileDestination('today')
+  scrollToControl('.dailyMetric.weight input')
  }
 
  function queueWaterSave(logDate:string,value:number|null){
@@ -696,10 +766,10 @@ export default function Page(){
   if(nextTarget.effective_from<=selectedDate&&(nextTarget.effective_to===null||selectedDate<nextTarget.effective_to)){
    setSelectedTarget(nextTarget)
   }
-  if(trackingView!=='day'&&session){
-   void refreshPeriod(trackingView,periodAnchor,session.user.id,nextGoal.id)
+  if(periodVisible&&session){
+   void refreshPeriod(activePeriodView,periodAnchor,session.user.id,nextGoal.id)
   }
-  setSettingsOpen(false)
+  closeSettings()
  }
 
  function finishProfileSettings(nextProfile:Profile){
@@ -754,7 +824,7 @@ export default function Page(){
   <div className="masterBrand">CUT365</div><p>Finishing your dashboard…</p>
  </main>
 
- return <main className="app">
+ return <main className="app" data-mobile-destination={mobileDestination}>
   <nav className="appHeader">
    <div><div className="brand">{goalIdentity(activeGoal.target_weight_lbs)}</div><small className="productMark">CUT365</small></div>
    <div className="navRight"><button className="settingsLink" onClick={()=>openSettings()}>Settings</button><button className="signOutLink" onClick={()=>supabase.auth.signOut()}>Sign out</button></div>
@@ -763,11 +833,11 @@ export default function Page(){
   {settingsOpen&&<GoalSettings
    session={session} profile={profile} goal={activeGoal} target={currentTarget} currentWeightLbs={latest}
    initialSection={settingsSection} workoutTemplates={workoutTemplates} customWorkoutTemplates={customWorkoutTemplates}
-   onClose={()=>setSettingsOpen(false)} onGoalSaved={finishGoalSettings} onProfileSaved={finishProfileSettings}
+   onClose={closeSettings} onSignOut={()=>supabase.auth.signOut()} onGoalSaved={finishGoalSettings} onProfileSaved={finishProfileSettings}
    onWorkoutTemplatesChange={setWorkoutTemplates} onCustomWorkoutTemplatesChange={setCustomWorkoutTemplates}
   />}
 
-  {trackingView==='day'?<>
+  <section className="dayView" hidden={!dayVisible}>
   <div className="dateNavRow">
    <div className="dateNav" aria-label="Select log date">
     <button onClick={()=>changeDate(-1)} aria-label="Previous day">‹</button>
@@ -778,26 +848,27 @@ export default function Page(){
   </div>
   {isToday&&hourInTimezone(profile.timezone)<4&&<button className="yesterdayShortcut" onClick={()=>changeDate(-1)}>Still logging yesterday?</button>}
 
-  <div className="trackingViewTabs" role="tablist" aria-label="Tracking view">
+  <div className="trackingViewTabs desktopTrackingTabs" role="tablist" aria-label="Tracking view">
    {(['day','week','month'] as const).map(view=><button type="button" role="tab" aria-selected={trackingView===view} className={trackingView===view?'active':''} key={view} onClick={()=>{
     setTrackingView(view)
     if(view!=='day')setPeriodAnchor(selectedDate)
    }}>{view[0].toUpperCase()+view.slice(1)}</button>)}
   </div>
 
-  {isToday&&currentTarget.source==='onboarding'&&!profile.getting_started_dismissed&&
+  {isToday&&(!isMobile||mobileDestination==='today')&&currentTarget.source==='onboarding'&&!profile.getting_started_dismissed&&
    <aside className="gettingStarted">
     <div className="gettingStartedHead"><strong>Start your first day</strong><button onClick={dismissFirstDay} aria-label="Dismiss getting started">×</button></div>
     <p>Log a meal · Add your weight · Add your steps</p>
    </aside>}
 
+  <div className="dayShared" hidden={isMobile&&mobileDestination==='training'}>
   <section className={`goalCard p${Math.min(4,Math.floor(progress/25)+1)}`}>
    <div><p className="eyebrow">PROGRESS TO YOUR GOAL{activeGoal.target_date?` · ${localDate(activeGoal.target_date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}`:''}</p><div className="weightLine"><strong>{formatWeightValue(displayedLatest)}</strong><span>{weightUnit}</span><i>→</i><b>{formatWeightValue(displayedTarget)}</b><span>{weightUnit}</span></div></div>
    <div className="goalMeta">{changeLabel==='No change'?<><strong>No change</strong><span>from start</span></>:<><strong>{displayedChange.toFixed(1)} {weightUnit}</strong><span>{changeLabel}</span></>}<strong>{progress.toFixed(0)}%</strong><span>complete</span></div>
    <div className="bar"><i style={{width:`${progress}%`}}/></div>
   </section>
 
-  <div className="domainTabs" role="tablist" aria-label="Dashboard domain">
+  <div className="domainTabs dayDomainTabs" role="tablist" aria-label="Dashboard domain">
    {(['nutrition','training'] as const).map(domain=><button type="button" role="tab" aria-selected={dashboardDomain===domain} className={dashboardDomain===domain?'active':''} key={domain} onClick={()=>setDashboardDomain(domain)}>{domain[0].toUpperCase()+domain.slice(1)}</button>)}
   </div>
 
@@ -805,12 +876,13 @@ export default function Page(){
    <Metric kind="weight" icon="●" label="Weight" value={displayWeight(weightLbs,weightUnit)} unit={weightUnit} target={`Goal ${formatWeightValue(displayedTarget)} ${weightUnit}`} step=".1" saveState={saveState.weight} onChange={value=>setWeightLbs(value===''?null:storedWeight(Number(value),weightUnit))} onSave={autosaveWeight}/>
    <Metric kind="steps" icon="↗" label="Steps" value={metrics.steps} unit="" target={`Goal ${formatTarget(targetForDay?.steps_target,0)}`} progress={targetForDay?.steps_target?Math.min(100,Number(metrics.steps??0)/targetForDay.steps_target*100):undefined} saveState={saveState.steps} onChange={value=>metricNumber('steps',value)} onSave={()=>autosaveMetric('steps',metrics.steps)}/>
   </section>
+  </div>
 
-  <section className="dashboardDomainPanel" role="tabpanel" aria-label="Nutrition" hidden={dashboardDomain!=='nutrition'}>
+  <section className="dashboardDomainPanel nutritionDomainPanel" role="tabpanel" aria-label="Nutrition" hidden={!nutritionVisible}>
 
   <div className="sectionHead">
    <div><p className="eyebrow">NUTRITION</p><h2>{isToday?'Today':selectedLabel}</h2></div>
-   <button type="button" className="primaryFoodAction" onClick={openMealForm}>+ Add food</button>
+   <button type="button" className="primaryFoodAction" onClick={()=>openMealForm()}>+ Add food</button>
   </div>
 
   <section className="quickAdd oneOffMeal" id="one-off-entry" hidden={!mealOpen}>
@@ -860,7 +932,7 @@ export default function Page(){
 
   <label className="notes"><span>Notes {saveState.notes&&<small>{saveState.notes}</small>}</span><textarea placeholder="Dinner out, hunger, workout, anything useful..." value={metrics.notes||''} onChange={event=>setMetrics(current=>({...current,notes:event.target.value}))} onBlur={()=>autosaveMetric('notes',metrics.notes)}/></label>
   </section>
-  <section className="dashboardDomainPanel" role="tabpanel" aria-label="Training" hidden={dashboardDomain!=='training'}>
+  <section className="dashboardDomainPanel trainingDomainPanel" role="tabpanel" aria-label="Training" hidden={!trainingVisible}>
    <section className="trainingWrap">
     <p className="eyebrow">{isToday?"TODAY'S TRAINING":"PRESCRIBED TRAINING"}</p>
     {strengthSuppressed?<div className="trainingRestState"><div><span>RECOVERY</span><strong>{workoutDisplayState==='rest'?'Rest day':'Checking today’s training…'}</strong></div><span>{workoutDisplayState==='rest'?`Next workout: ${workoutName(nextWorkout)}`:'Reviewing completed workouts'}</span></div>:<article className="trainingCard expandedTrainingCard">
@@ -884,31 +956,68 @@ export default function Page(){
    </section>
    <CustomWorkoutLauncher userId={session.user.id} logDate={selectedDate} isToday={isToday} templates={customWorkoutTemplates} completedIds={completedCustomWorkoutIds} onCompleted={finishCustomWorkout} onManage={()=>openSettings('workouts')}/>
   </section>
-  </>:<>
+  </section>
+  <section className="periodView" hidden={!periodVisible}>
    <div className="dateNavRow periodNavRow">
-    <div className="dateNav" aria-label={`Select ${trackingView}`}>
-     <button onClick={()=>changePeriod(-1)} aria-label={`Previous ${trackingView}`}>‹</button>
-     <strong>{periodBounds(trackingView,periodAnchor).start.toUpperCase()} <i>·</i> {trackingView.toUpperCase()}</strong>
-     <button onClick={()=>changePeriod(1)} disabled={!canNavigateToPeriod(trackingView,shiftPeriodAnchor(trackingView,periodAnchor,1),today)} aria-label={`Next ${trackingView}`}>›</button>
+    <div className="dateNav" aria-label={`Select ${activePeriodView}`}>
+     <button onClick={()=>changePeriod(-1)} aria-label={`Previous ${activePeriodView}`}>‹</button>
+     <strong>{periodBounds(activePeriodView,periodAnchor).start.toUpperCase()} <i>·</i> {activePeriodView.toUpperCase()}</strong>
+     <button onClick={()=>changePeriod(1)} disabled={!canNavigateToPeriod(activePeriodView,shiftPeriodAnchor(activePeriodView,periodAnchor,1),today)} aria-label={`Next ${activePeriodView}`}>›</button>
    </div>
-   {periodBounds(trackingView,periodAnchor).start!==periodBounds(trackingView,today).start&&<button className="todayButton" onClick={()=>setPeriodAnchor(today)}>Current</button>}
+   {periodBounds(activePeriodView,periodAnchor).start!==periodBounds(activePeriodView,today).start&&<button className="todayButton" onClick={()=>setPeriodAnchor(today)}>Current</button>}
   </div>
-   <div className="trackingViewTabs" role="tablist" aria-label="Tracking view">
+   <div className="trackingViewTabs desktopTrackingTabs" role="tablist" aria-label="Tracking view">
     {(['day','week','month'] as const).map(view=><button type="button" role="tab" aria-selected={trackingView===view} className={trackingView===view?'active':''} key={view} onClick={()=>{
      setTrackingView(view)
      if(view==='day')selectDate(periodAnchor)
     }}>{view[0].toUpperCase()+view.slice(1)}</button>)}
    </div>
+   <div className="mobileProgressTabs" role="tablist" aria-label="Progress range">
+    {(['week','month'] as const).map(view=><button type="button" role="tab" aria-selected={mobileProgressView===view} className={mobileProgressView===view?'active':''} key={view} onClick={()=>setMobileProgressView(view)}>{view[0].toUpperCase()+view.slice(1)}</button>)}
+   </div>
    {periodLoading&&<p className="periodLoading">Loading progress…</p>}
    {!periodLoading&&periodData&&<>
-    <PeriodSharedProgressView view={trackingView} data={periodData} weightUnit={weightUnit} onDate={openDateFromPeriod}/>
+    <PeriodSharedProgressView view={activePeriodView} data={periodData} weightUnit={weightUnit} onDate={openDateFromPeriod}/>
     <div className="domainTabs" role="tablist" aria-label="Dashboard domain">
      {(['nutrition','training'] as const).map(domain=><button type="button" role="tab" aria-selected={dashboardDomain===domain} className={dashboardDomain===domain?'active':''} key={domain} onClick={()=>setDashboardDomain(domain)}>{domain[0].toUpperCase()+domain.slice(1)}</button>)}
     </div>
     <PeriodProgressView domain={dashboardDomain} data={periodData} onDate={openDateFromPeriod}/>
    </>}
-  </>}
+  </section>
+
+  {logSheetOpen&&<div className="mobileLogShade" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)setLogSheetOpen(false)}}>
+   <section className="mobileLogSheet" role="dialog" aria-modal="true" aria-labelledby="mobile-log-title">
+    <div className="mobileLogHead"><div><p className="eyebrow">{selectedLabel.toUpperCase()}</p><h2 id="mobile-log-title">Log</h2></div><button ref={logCloseRef} type="button" onClick={()=>setLogSheetOpen(false)} aria-label="Close log menu">×</button></div>
+    <div className="mobileLogActions">
+     <button type="button" onClick={()=>openMealForm()}><MobileNavIcon name="food"/><span>Food</span></button>
+     <button type="button" onClick={()=>openMealForm('drink')}><MobileNavIcon name="drink"/><span>Drink</span></button>
+     <button type="button" onClick={openWaterLog}><MobileNavIcon name="water"/><span>Water</span></button>
+     <button type="button" onClick={openWeightLog}><MobileNavIcon name="weight"/><span>Weight</span></button>
+     <button type="button" onClick={()=>chooseMobileDestination('training')}><MobileNavIcon name="training"/><span>Workout</span></button>
+    </div>
+   </section>
+  </div>}
+
+  <nav className="mobileBottomNav" aria-label="Primary navigation">
+   <button type="button" aria-current={mobileDestination==='today'?'page':undefined} onClick={()=>chooseMobileDestination('today')}><MobileNavIcon name="today"/><span>Today</span></button>
+   <button type="button" aria-current={mobileDestination==='progress'?'page':undefined} onClick={()=>chooseMobileDestination('progress')}><MobileNavIcon name="progress"/><span>Progress</span></button>
+   <button type="button" className="mobileLogButton" aria-label="Log" aria-haspopup="dialog" aria-expanded={logSheetOpen} onClick={()=>setLogSheetOpen(true)}><span aria-hidden="true">+</span></button>
+   <button type="button" aria-current={mobileDestination==='training'?'page':undefined} onClick={()=>chooseMobileDestination('training')}><MobileNavIcon name="training"/><span>Training</span></button>
+   <button type="button" aria-current={mobileDestination==='profile'?'page':undefined} onClick={openMobileProfile}><MobileNavIcon name="profile"/><span>Profile</span></button>
+  </nav>
  </main>
+}
+
+function MobileNavIcon({name}:{name:'today'|'progress'|'training'|'profile'|'food'|'drink'|'water'|'weight'}){
+ const shared={width:20,height:20,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round' as const,strokeLinejoin:'round' as const,'aria-hidden':true}
+ if(name==='today')return <svg {...shared}><path d="M4 9.5 12 3l8 6.5V21h-6v-6h-4v6H4Z"/></svg>
+ if(name==='progress')return <svg {...shared}><path d="M4 19V9m6 10V5m6 14v-7m4 7V3"/></svg>
+ if(name==='training')return <svg {...shared}><path d="M6 9v6m12-6v6M3.5 10.5v3m17-3v3M6 12h12"/></svg>
+ if(name==='profile')return <svg {...shared}><circle cx="12" cy="8" r="3.5"/><path d="M5 21c.7-4 3-6 7-6s6.3 2 7 6"/></svg>
+ if(name==='food')return <svg {...shared}><path d="M7 3v8m-3-8v5c0 2 1 3 3 3s3-1 3-3V3m-3 8v10m9-18v18m0-18c3 2 4 5 4 8h-4"/></svg>
+ if(name==='drink')return <svg {...shared}><path d="M5 4h14l-2 17H7Zm2 5h10"/></svg>
+ if(name==='water')return <svg {...shared}><path d="M12 3s6 7 6 12a6 6 0 0 1-12 0c0-5 6-12 6-12Z"/></svg>
+ return <svg {...shared}><path d="M4 19V8h16v11M7 8a5 5 0 0 1 10 0m-7 0a2 2 0 0 1 4 0"/></svg>
 }
 
 function NutritionMetric({kind,icon,label,value,unit,target,partial,loading,saveState,onSave}:{

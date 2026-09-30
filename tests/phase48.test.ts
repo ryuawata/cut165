@@ -319,7 +319,7 @@ test('Water input and Quick Adds share one queue, and Goal Settings refreshes vi
  assert.match(page,/function incrementWater[\s\S]*queueWaterSave\(logDate,next\)/)
  assert.doesNotMatch(page,/autosaveMetric\('water_oz'/)
  assert.match(page,/const refreshPeriod=useCallback/)
- assert.match(page,/function finishGoalSettings[\s\S]*trackingView!==['"]day['"][\s\S]*refreshPeriod\(trackingView,periodAnchor,session\.user\.id,nextGoal\.id\)/)
+ assert.match(page,/function finishGoalSettings[\s\S]*periodVisible[\s\S]*refreshPeriod\(activePeriodView,periodAnchor,session\.user\.id,nextGoal\.id\)/)
  assert.equal(page.match(/getPeriodProgress\(supabase/g)?.length,1)
 })
 
