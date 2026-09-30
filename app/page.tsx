@@ -16,8 +16,8 @@ import {
  type BodyMeasurement,type WeightHistory
 } from '../lib/body-measurements'
 import {
- getTodayWorkoutCoachingFacts,getWorkoutCoachingFacts,getWorkoutPlan,setWorkoutCompletion,
- type WorkoutPlan
+ getWorkoutCoachingFacts,getWorkoutPlan,resolveWorkoutDisplayState,setWorkoutCompletion,
+ type WorkoutCoachingFacts,type WorkoutPlan
 } from '../lib/workouts'
 import {
  createNutritionEntry,deleteNutritionEntry,emptyDailyNutritionTotals,
@@ -31,7 +31,7 @@ import {getActiveGoal,getCurrentGoalTarget,getEffectiveGoalTarget,type Goal,type
 import {actualWeightChange,calendarDateInTimezone,formatWeightValue,goalIdentity,goalProgress,hourInTimezone,kilogramsToPounds,poundsToKilograms,primaryCalorieTarget} from '../lib/targets'
 import {decideAccountBootstrap,decideCompatibilityTimezone} from '../lib/account-bootstrap'
 import {
- calendarWeekBounds,nextProgramWorkout,recommendedWeeklyWorkouts,workoutName
+ calendarWeekBoundsForDate,nextProgramWorkout,recommendedWeeklyWorkouts,workoutName
 } from '../lib/coaching'
 import {
  defaultWorkoutTemplate,getWorkoutTemplates,resolveWorkoutTemplate,snapshotWorkout,
@@ -141,12 +141,7 @@ export default function Page(){
  const [weightLbs,setWeightLbs]=useState<number|null>(null)
  const [weightHistory,setWeightHistory]=useState<WeightHistory[]>([])
  const [workoutPlan,setWorkoutPlan]=useState<WorkoutPlan>(()=>emptyWorkoutPlan(localISO()))
- const [workoutFacts,setWorkoutFacts]=useState<{
-  lastCompleted:'full_body_a'|'full_body_b'|'full_body_c'|null
-  lastCompletedDate:string|null
-  completedThisWeek:number
-  strengthRecommended:boolean
- }|null>(null)
+ const [workoutFacts,setWorkoutFacts]=useState<WorkoutCoachingFacts|null>(null)
  const [workoutTemplates,setWorkoutTemplates]=useState<WorkoutTemplate[]>(()=>[
   defaultWorkoutTemplate('full_body_a'),defaultWorkoutTemplate('full_body_b'),defaultWorkoutTemplate('full_body_c')
  ])
@@ -332,9 +327,7 @@ export default function Page(){
   setEntries([])
   setTotals(emptyDailyNutritionTotals(logDate))
   setNutritionLoading(true)
-  const coachingWeek=profile&&logDate===calendarDateInTimezone(profile.timezone)
-   ?calendarWeekBounds(profile.timezone)
-   :null
+  const coachingWeek=profile?calendarWeekBoundsForDate(logDate):null
   const results=await Promise.allSettled([
    getDailyMetrics(supabase,session.user.id,logDate),
    getBodyMeasurement(supabase,session.user.id,logDate),
@@ -468,7 +461,8 @@ export default function Page(){
  const displayedChange=Math.abs(displayWeight(actualChange.change,weightUnit)??0)
  const changeLabel=actualChange.direction==='unchanged'?'No change':actualChange.direction
  const nextWorkout=workoutFacts?nextProgramWorkout(workoutFacts.lastCompleted):'full_body_a'
- const strengthSuppressed=isToday&&!workoutPlan.completed&&(!workoutFacts||!workoutFacts.strengthRecommended)
+ const workoutDisplayState=resolveWorkoutDisplayState(workoutPlan,workoutFacts)
+ const strengthSuppressed=workoutDisplayState!=='workout'
 
  const metricNumber=(key:'steps'|'water_oz',value:string)=>{
   const next=value===''?null:Number(value)
@@ -604,11 +598,11 @@ export default function Page(){
     isToday:logDate===today,
     workoutSnapshot:template?snapshotWorkout(template):null
    })
-   const week=profile?calendarWeekBounds(profile.timezone):null
+   const week=profile?calendarWeekBoundsForDate(logDate):null
    const factsSequence=++workoutFactsSequence.current
    const [refreshed,nextFacts]=await Promise.all([
     getWorkoutPlan(supabase,session.user.id,logDate),
-    profile&&week&&logDate===today
+     profile&&week
      ?getWorkoutCoachingFacts(
        supabase,session.user.id,week.start,week.endExclusive,logDate,
        recommendedWeeklyWorkouts(profile.exercise_frequency)
@@ -712,17 +706,19 @@ export default function Page(){
   const frequencyChanged=profile?.exercise_frequency!==nextProfile.exercise_frequency
   setProfile(nextProfile)
   if(!session||!frequencyChanged)return
-  const refreshInstant=new Date()
-  const expectedDate=calendarDateInTimezone(nextProfile.timezone,refreshInstant)
-  if(selectedDateRef.current!==expectedDate)return
+  const logDate=selectedDateRef.current
+  const week=calendarWeekBoundsForDate(logDate)
   const factsSequence=++workoutFactsSequence.current
   setWorkoutFacts(null)
-  void getTodayWorkoutCoachingFacts(supabase,session.user.id,nextProfile,refreshInstant).then(nextFacts=>{
-   if(factsSequence===workoutFactsSequence.current&&selectedDateRef.current===nextFacts.logDate){
+  void getWorkoutCoachingFacts(
+   supabase,session.user.id,week.start,week.endExclusive,logDate,
+   recommendedWeeklyWorkouts(nextProfile.exercise_frequency)
+  ).then(nextFacts=>{
+   if(factsSequence===workoutFactsSequence.current&&selectedDateRef.current===logDate){
     setWorkoutFacts(nextFacts)
    }
   }).catch(error=>{
-   if(factsSequence===workoutFactsSequence.current&&selectedDateRef.current===expectedDate){
+   if(factsSequence===workoutFactsSequence.current&&selectedDateRef.current===logDate){
     setMsg(errorText(error))
    }
   })
@@ -867,7 +863,7 @@ export default function Page(){
   <section className="dashboardDomainPanel" role="tabpanel" aria-label="Training" hidden={dashboardDomain!=='training'}>
    <section className="trainingWrap">
     <p className="eyebrow">{isToday?"TODAY'S TRAINING":"PRESCRIBED TRAINING"}</p>
-    {strengthSuppressed?<div className="trainingRestState"><div><span>RECOVERY</span><strong>{workoutFacts?'Rest day':'Checking today’s training…'}</strong></div><span>{workoutFacts?`Next workout: ${workoutName(nextWorkout)}`:'Reviewing completed workouts'}</span></div>:<article className="trainingCard expandedTrainingCard">
+    {strengthSuppressed?<div className="trainingRestState"><div><span>RECOVERY</span><strong>{workoutDisplayState==='rest'?'Rest day':'Checking today’s training…'}</strong></div><span>{workoutDisplayState==='rest'?`Next workout: ${workoutName(nextWorkout)}`:'Reviewing completed workouts'}</span></div>:<article className="trainingCard expandedTrainingCard">
      <header>
       <span className="trainingTitle"><strong>{training.name}</strong><small>{training.type} <i>·</i> {training.duration}</small></span>
      </header>

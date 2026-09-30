@@ -251,10 +251,20 @@ test('onboarding consumer copy uses Gender once, keeps current weight in step on
  assert.doesNotMatch(source,/>Range \{/)
 })
 
-test('profile frequency saves refresh today using the newly persisted profile',()=>{
+test('profile frequency saves refresh the selected day using the newly persisted profile',()=>{
  const source=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8')
  assert.match(source,/frequencyChanged=profile\?\.exercise_frequency!==nextProfile\.exercise_frequency/)
- assert.match(source,/getTodayWorkoutCoachingFacts\(supabase,session\.user\.id,nextProfile,refreshInstant\)/)
+ assert.match(source,/const logDate=selectedDateRef\.current[\s\S]*calendarWeekBoundsForDate\(logDate\)[\s\S]*recommendedWeeklyWorkouts\(nextProfile\.exercise_frequency\)/)
+})
+
+test('selected-date loading reconstructs coaching without a today-only gate',()=>{
+ const source=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8')
+ const loadSelected=source.slice(source.indexOf('async function loadSelected'),source.indexOf('async function refreshNutrition'))
+ assert.match(loadSelected,/calendarWeekBoundsForDate\(logDate\)/)
+ assert.match(loadSelected,/getWorkoutCoachingFacts\([\s\S]*logDate/)
+ assert.doesNotMatch(loadSelected,/logDate===calendarDateInTimezone/)
+ assert.match(source,/resolveWorkoutDisplayState\(workoutPlan,workoutFacts\)/)
+ assert.doesNotMatch(source,/strengthSuppressed=isToday/)
 })
 
 test('mobile forms keep accessible zoom and 16px interactive text',()=>{

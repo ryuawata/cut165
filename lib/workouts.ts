@@ -28,6 +28,15 @@ export type WorkoutPlan={
  strengthOpportunity:boolean
 }
 
+export type WorkoutCoachingFacts={
+ lastCompleted:StructuredWorkoutCode|null
+ lastCompletedDate:string|null
+ completedThisWeek:number
+ strengthRecommended:boolean
+}
+
+export type WorkoutDisplayState='loading'|'rest'|'workout'
+
 const sequenceCodes:StructuredWorkoutCode[]=['full_body_a','full_body_b','full_body_c']
 const strengthCodes:WorkoutCode[]=['full_body_a','full_body_b','full_body_c','legacy_strength','custom_strength']
 const programDisplayCodes:WorkoutCode[]=['full_body_a','full_body_b','full_body_c','recovery','legacy_strength']
@@ -67,6 +76,14 @@ export function nextStructuredWorkout(previous:WorkoutCode|null):StructuredWorko
  return 'full_body_a'
 }
 
+export function resolveWorkoutDisplayState(
+ plan:WorkoutPlan,facts:WorkoutCoachingFacts|null
+):WorkoutDisplayState{
+ if(plan.session||plan.completed)return 'workout'
+ if(!facts)return 'loading'
+ return facts.strengthRecommended?'workout':'rest'
+}
+
 export async function getWorkoutPlan(
  client:TypedSupabaseClient,userId:string,logDate:string
 ):Promise<WorkoutPlan>{
@@ -99,7 +116,7 @@ export async function getWorkoutSessionsRange(client:TypedSupabaseClient,userId:
 
 export async function getWorkoutCoachingFacts(
  client:TypedSupabaseClient,userId:string,weekStart:string,weekEndExclusive:string,throughDate:string,weeklyTarget:number
-){
+):Promise<WorkoutCoachingFacts>{
  const [sequenceResult,latestStrengthResult,weekResult]=await Promise.all([
   client.from('workout_sessions').select('workout_code,scheduled_date')
    .eq('user_id',userId).eq('status','completed').in('workout_code',sequenceCodes)

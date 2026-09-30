@@ -16,13 +16,16 @@ export function nextProgramWorkout(lastCompleted:ProgramWorkoutCode|null):Progra
  return 'full_body_a'
 }
 
-export function calendarWeekBounds(timezone:string,date=new Date()){
- const today=calendarDateInTimezone(timezone,date)
- const [year,month,day]=today.split('-').map(Number)
+export function calendarWeekBoundsForDate(logDate:string){
+ const [year,month,day]=logDate.split('-').map(Number)
  const weekday=new Date(Date.UTC(year,month-1,day)).getUTCDay()
  const mondayOffset=(weekday+6)%7
- const start=shiftCalendarDate(today,-mondayOffset)
+ const start=shiftCalendarDate(logDate,-mondayOffset)
  return {start,endExclusive:shiftCalendarDate(start,7)}
+}
+
+export function calendarWeekBounds(timezone:string,date=new Date()){
+ return calendarWeekBoundsForDate(calendarDateInTimezone(timezone,date))
 }
 
 function calendarDayDistance(from:string,to:string){

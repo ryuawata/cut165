@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
- calendarWeekBounds,nextProgramWorkout,recommendedWeeklyWorkouts,strengthRecommendation
+ calendarWeekBounds,calendarWeekBoundsForDate,nextProgramWorkout,recommendedWeeklyWorkouts,strengthRecommendation
 } from '../lib/coaching.ts'
 import {
- getTodayWorkoutCoachingFacts,getWorkoutCoachingFacts,getWorkoutPlan,nextStructuredWorkout,setWorkoutCompletion
+ getTodayWorkoutCoachingFacts,getWorkoutCoachingFacts,getWorkoutPlan,nextStructuredWorkout,
+ resolveWorkoutDisplayState,setWorkoutCompletion,type WorkoutPlan
 } from '../lib/workouts.ts'
 import {PRODUCT_NAME,SITE_URL} from '../lib/site.ts'
 
@@ -96,6 +97,12 @@ test('calendar weeks use local Monday through Sunday boundaries',()=>{
  assert.deepEqual(calendarWeekBounds('UTC',instant),{
   start:'2026-09-21',endExclusive:'2026-09-28'
  })
+ assert.deepEqual(calendarWeekBoundsForDate('2026-09-28'),{
+  start:'2026-09-28',endExclusive:'2026-10-05'
+ })
+ assert.deepEqual(calendarWeekBoundsForDate('2026-10-04'),{
+  start:'2026-09-28',endExclusive:'2026-10-05'
+ })
 })
 
 function coachingClient(options:{sequenceCode:'full_body_a'|'full_body_b'|'full_body_c'|null;strengthCode:'full_body_a'|'full_body_b'|'full_body_c'|'legacy_strength'|'custom_strength'|null;strengthDate:string|null;weekCount:number}){
@@ -164,6 +171,119 @@ test('workout coaching separates A/B/C sequence from all-strength cadence histor
  assert.ok(filters.some(([,operator,column,value])=>operator==='gte'&&column==='scheduled_date'&&value==='2026-09-14'))
  assert.ok(filters.some(([,operator,column,value])=>operator==='lt'&&column==='scheduled_date'&&value==='2026-09-21'))
  assert.equal(filters.filter(([,operator,column,value])=>operator==='lte'&&column==='scheduled_date'&&value==='2026-09-20').length,3)
+})
+
+test('historical next-day cadence stays Rest while sequence remains Full Body B',async()=>{
+ const {client}=coachingClient({
+  sequenceCode:'full_body_a',strengthCode:'full_body_a',strengthDate:'2026-09-28',weekCount:1
+ })
+ const facts=await getWorkoutCoachingFacts(client,'user-123','2026-09-28','2026-10-05','2026-09-29',2)
+ const plan:WorkoutPlan={code:'full_body_b',completed:false,session:null,strengthOpportunity:true}
+ assert.equal(facts.strengthRecommended,false)
+ assert.equal(nextProgramWorkout(facts.lastCompleted),'full_body_b')
+ assert.equal(resolveWorkoutDisplayState(plan,facts),'rest')
+})
+
+test('historical cadence recommends the next sequence workout after enough recovery',async()=>{
+ const {client}=coachingClient({
+  sequenceCode:'full_body_a',strengthCode:'full_body_a',strengthDate:'2026-09-28',weekCount:1
+ })
+ const facts=await getWorkoutCoachingFacts(client,'user-123','2026-09-28','2026-10-05','2026-10-01',2)
+ const plan:WorkoutPlan={code:'full_body_b',completed:false,session:null,strengthOpportunity:true}
+ assert.equal(facts.strengthRecommended,true)
+ assert.equal(nextProgramWorkout(facts.lastCompleted),'full_body_b')
+ assert.equal(resolveWorkoutDisplayState(plan,facts),'workout')
+})
+
+test('a stored historical completion overrides reconstructed Rest',()=>{
+ const plan={
+  code:'full_body_b',completed:true,strengthOpportunity:true,
+  session:{status:'completed',workout_code:'full_body_b'}
+ } as WorkoutPlan
+ const facts={
+  lastCompleted:'full_body_b' as const,lastCompletedDate:'2026-09-29',completedThisWeek:2,
+  strengthRecommended:false
+ }
+ assert.equal(resolveWorkoutDisplayState(plan,facts),'workout')
+})
+
+test('stored planned and recovery sessions remain visible over reconstructed Rest',()=>{
+ const facts={
+  lastCompleted:'full_body_a' as const,lastCompletedDate:'2026-09-28',completedThisWeek:1,
+  strengthRecommended:false
+ }
+ const planned={
+  code:'full_body_b',completed:false,strengthOpportunity:true,
+  session:{status:'planned',workout_code:'full_body_b'}
+ } as WorkoutPlan
+ const recovery={
+  code:'recovery',completed:false,strengthOpportunity:false,
+  session:{status:'planned',workout_code:'recovery'}
+ } as WorkoutPlan
+ assert.equal(resolveWorkoutDisplayState(planned,facts),'workout')
+ assert.equal(resolveWorkoutDisplayState(recovery,facts),'workout')
+})
+
+test('cadence loading never flashes an unstored sequence workout',()=>{
+ const plan:WorkoutPlan={code:'full_body_b',completed:false,session:null,strengthOpportunity:true}
+ assert.equal(resolveWorkoutDisplayState(plan,null),'loading')
+})
+
+type HistoryWorkout={
+ id:string
+ user_id:string
+ workout_code:'full_body_a'|'full_body_b'|'full_body_c'|'legacy_strength'|'custom_strength'|'custom_cardio'
+ scheduled_date:string
+ status:'completed'|'planned'|'skipped'
+}
+
+function historyCoachingClient(rows:HistoryWorkout[]){
+ class HistoryQuery implements PromiseLike<{data:HistoryWorkout[];error:null}>{
+  private predicates:Array<(row:HistoryWorkout)=>boolean>=[]
+  select(){return this}
+  eq(column:keyof HistoryWorkout,value:unknown){this.predicates.push(row=>row[column]===value);return this}
+  in(column:keyof HistoryWorkout,values:unknown[]){this.predicates.push(row=>values.includes(row[column]));return this}
+  lte(column:'scheduled_date',value:string){this.predicates.push(row=>row[column]<=value);return this}
+  gte(column:'scheduled_date',value:string){this.predicates.push(row=>row[column]>=value);return this}
+  lt(column:'scheduled_date',value:string){this.predicates.push(row=>row[column]<value);return this}
+  order(){return this}
+  limit(){return this}
+  private matches(){return rows.filter(row=>this.predicates.every(predicate=>predicate(row))).sort((a,b)=>b.scheduled_date.localeCompare(a.scheduled_date))}
+  async maybeSingle(){return {data:this.matches()[0]??null,error:null}}
+  then<TResult1={data:HistoryWorkout[];error:null},TResult2=never>(
+   onfulfilled?:((value:{data:HistoryWorkout[];error:null})=>TResult1|PromiseLike<TResult1>)|null
+  ):PromiseLike<TResult1|TResult2>{
+   return Promise.resolve({data:this.matches(),error:null}).then(onfulfilled)
+  }
+ }
+ const client={from(table:string){assert.equal(table,'workout_sessions');return new HistoryQuery()}}
+ return client as unknown as Parameters<typeof getWorkoutCoachingFacts>[0]
+}
+
+test('future completions never leak into historical cadence or sequence',async()=>{
+ const client=historyCoachingClient([
+  {id:'a',user_id:'user-123',workout_code:'full_body_a',scheduled_date:'2026-09-28',status:'completed'},
+  {id:'b',user_id:'user-123',workout_code:'full_body_b',scheduled_date:'2026-09-30',status:'completed'}
+ ])
+ const facts=await getWorkoutCoachingFacts(client,'user-123','2026-09-28','2026-10-05','2026-09-29',2)
+ assert.deepEqual(facts,{
+  lastCompleted:'full_body_a',lastCompletedDate:'2026-09-28',completedThisWeek:1,strengthRecommended:false
+ })
+ assert.equal(nextProgramWorkout(facts.lastCompleted),'full_body_b')
+})
+
+test('historical custom Strength affects cadence without advancing A/B/C',async()=>{
+ const client=historyCoachingClient([
+  {id:'a',user_id:'user-123',workout_code:'full_body_a',scheduled_date:'2026-09-27',status:'completed'},
+  {id:'custom',user_id:'user-123',workout_code:'custom_strength',scheduled_date:'2026-09-28',status:'completed'},
+  {id:'cardio',user_id:'user-123',workout_code:'custom_cardio',scheduled_date:'2026-09-29',status:'completed'}
+ ])
+ const facts=await getWorkoutCoachingFacts(client,'user-123','2026-09-28','2026-10-05','2026-09-29',2)
+ assert.equal(facts.lastCompleted,'full_body_a')
+ assert.equal(facts.lastCompletedDate,'2026-09-28')
+ assert.equal(facts.completedThisWeek,1)
+ assert.equal(facts.strengthRecommended,false)
+ assert.equal(nextProgramWorkout(facts.lastCompleted),'full_body_b')
 })
 
 test('completed Full Body C advances sequence and blocks next-day strength',async()=>{
