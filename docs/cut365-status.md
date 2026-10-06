@@ -45,3 +45,10 @@
 ## Next task
 
 Review the Phase 4.8.1 UI preview and regression results, then merge only after approval. No database action is required for this phase. Subscriptions, payments, AI coaching, photo logging, Apple Health, notifications, and native apps remain deferred.
+
+## Phase 5.0 MCP foundation (unmerged)
+
+- Branch: `cut365-mcp-foundation`, based on `main` at `b94f584fb3f9a9ac19a59aa603e4157e36097b59`.
+- Added authenticated, stateless Streamable HTTP at `/api/mcp` and only `get_today_summary`.
+- Reuses existing read services with verified user context and RLS; no service-role MCP access, writes, migrations, Stripe or AI coaching.
+- See [MCP contract and operational notes](mcp-foundation.md) for client setup, null semantics, logging and OAuth limitations.
