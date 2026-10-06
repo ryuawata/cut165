@@ -181,7 +181,7 @@ test('partial totals block replacement and normal entries reject negatives',asyn
 
 test('daily total replacement updates or deletes one deterministic owned correction',async()=>{
  type Row=Record<string,unknown>
- let existing:Row|null={
+ const existing:Row|null={
   id:'correction-1',user_id:'user-1',log_date:'2026-09-22',consumed_at:null,
   entry_type:'adjustment',meal_slot:null,description:'Daily calorie correction',calories:300,
   protein_g:null,carbs_g:null,fat_g:null,alcohol_servings:null,source:'manual',

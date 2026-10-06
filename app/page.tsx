@@ -1025,6 +1025,8 @@ function NutritionMetric({kind,icon,label,value,unit,target,partial,loading,save
  saveState?:string;onSave:(value:number)=>Promise<void>
 }){
  const [draft,setDraft]=useState(value?.toString()??'')
+ // The persisted total can change after save or date navigation; keep an in-progress input synchronized.
+ // eslint-disable-next-line react-hooks/set-state-in-effect
  useEffect(()=>setDraft(value?.toString()??''),[value])
  const commit=()=>{
   if(partial||draft.trim()==='')return

@@ -20,6 +20,8 @@ export default function WorkoutTemplateEditor({userId,templates,onChange}:{
  const [draft,setDraft]=useState(()=>clone(active))
  const [busy,setBusy]=useState(false)
  const [message,setMessage]=useState('')
+ // Switching tabs or receiving a saved template intentionally replaces the editor draft.
+ // eslint-disable-next-line react-hooks/set-state-in-effect
  useEffect(()=>setDraft(clone(active)),[active.id,code])
 
  const updateExercise=(index:number,patch:Partial<WorkoutExercise>)=>setDraft(current=>({

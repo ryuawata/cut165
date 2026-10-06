@@ -530,6 +530,21 @@ When touching scheduling or history logic, include representative past, present,
 
 ---
 
+# Required Validation
+
+Before completing implementation work, run:
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm test`
+- `npm run build`
+
+Do not claim a task is complete if one of these fails unless the failure is clearly unrelated and explicitly reported.
+
+Do not add isolated Supabase test infrastructure as routine setup. Introduce it only when work involving RLS, migrations, authentication behavior, goal-target persistence, or destructive data changes makes it necessary.
+
+---
+
 # Validation Before Completion
 
 Before considering a task complete, run the relevant available checks.

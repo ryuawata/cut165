@@ -234,8 +234,8 @@ test('custom template CRUD is explicitly scoped to the authenticated user',async
  assert.deepEqual(readFilters,[['user_id','user-1']])
 
  let created:Record<string,unknown>|null=null
- let updateFilters:Array<[string,unknown]>=[]
- let deleteFilters:Array<[string,unknown]>=[]
+ const updateFilters:Array<[string,unknown]>=[]
+ const deleteFilters:Array<[string,unknown]>=[]
  const saved=template()
  const singleChain={select(){return this},async single(){return {data:saved,error:null}}}
  const createClient={from(){return {insert(values:Record<string,unknown>){created=values;return singleChain}}}} as unknown as Parameters<typeof createCustomWorkoutTemplate>[0]
