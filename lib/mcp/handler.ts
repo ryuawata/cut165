@@ -1,4 +1,4 @@
-import {WebStandardStreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
+import {createMcpHandler as createProtocolHandler} from '@modelcontextprotocol/server'
 import {authenticateMcp,McpAccessError} from './context.ts'
 import {createMcpServer} from './server.ts'
 
@@ -28,12 +28,15 @@ export function createMcpHandler(deps:Dependencies={}){
     response.headers.set('Allow','POST')
     return response
    }
-   const server=(deps.createServer??createMcpServer)(context,()=>log({event:'mcp_tool_error',request_id:requestId,code:'SUMMARY_UNAVAILABLE'}))
-   const transport=new WebStandardStreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true,maxRequestBodySize:16*1024})
+   if(!(request.headers.get('accept')??'').toLowerCase().includes('application/json'))return failure(406,'Not acceptable.')
+   const protocol=createProtocolHandler(
+    ()=> (deps.createServer??createMcpServer)(context,()=>log({event:'mcp_tool_error',request_id:requestId,code:'SUMMARY_UNAVAILABLE'})),
+    {legacy:'reject',maxRequestBodySize:16*1024,
+     onerror:()=>log({event:'mcp_protocol_error',request_id:requestId,code:'PROTOCOL_ERROR'})}
+   )
    try{
-    await server.connect(transport)
-    return finish(await transport.handleRequest(request))
-   }finally{await server.close()}
+    return finish(await protocol.fetch(request))
+   }finally{await protocol.close()}
   }catch(error){
    return failure(error instanceof McpAccessError?error.status:500,
     error instanceof McpAccessError?error.message:'MCP request failed.')

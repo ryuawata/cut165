@@ -7,33 +7,44 @@ import {getTodaySummary} from '../lib/mcp/today-summary.ts'
 import type {McpContext} from '../lib/mcp/context.ts'
 
 const context={userId:'alice',client:{} as McpContext['client']}
-const headers={authorization:'Bearer example',accept:'application/json, text/event-stream','content-type':'application/json','mcp-protocol-version':'2025-11-25'}
-const request=(body:unknown,extra:Record<string,string>={})=>new Request('https://cut365.app/api/mcp',{method:'POST',headers:{...headers,...extra},body:JSON.stringify(body)})
-const rpc=(method:string,params?:unknown)=>({jsonrpc:'2.0',id:1,method,...(params===undefined?{}:{params})})
+const protocolVersion='2026-07-28'
+const envelope={
+ 'io.modelcontextprotocol/protocolVersion':protocolVersion,
+ 'io.modelcontextprotocol/clientCapabilities':{},
+ 'io.modelcontextprotocol/clientInfo':{name:'test',version:'1'}
+}
+const headers={authorization:'Bearer example',accept:'application/json, text/event-stream','content-type':'application/json','mcp-protocol-version':protocolVersion}
+const request=(body:unknown,extra:Record<string,string>={})=>{
+ const method=typeof body==='object'&&body!==null&&'method' in body&&typeof body.method==='string'?body.method:''
+ const params=typeof body==='object'&&body!==null&&'params' in body&&typeof body.params==='object'&&body.params!==null?body.params:null
+ const name=params&&'name' in params&&typeof params.name==='string'?params.name:''
+ return new Request('https://cut365.app/api/mcp',{method:'POST',headers:{...headers,...(method?{'mcp-method':method}:{}),...(name?{'mcp-name':name}:{}),...extra},body:JSON.stringify(body)})
+}
+const rpc=(method:string,params:Record<string,unknown>={})=>({jsonrpc:'2.0',id:1,method,params:{...params,_meta:envelope}})
 const setup=(summary=async(ctx:McpContext)=>({status:ctx.userId,date:'2026-10-06'}))=>{
  const logs:Record<string,unknown>[]=[]
  const handler=createMcpHandler({authenticate:async()=>context,log:e=>logs.push(e),createServer:(ctx,onError)=>createMcpServer(ctx,onError,summary)})
  return {handler,logs}
 }
 
-test('MCP initialize, notification, ping, list and call round trip',async()=>{
+test('MCP 2026-07-28 discovery, list and call round trip without initialize',async()=>{
  const {handler}=setup()
- const init=await handler(request(rpc('initialize',{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'test',version:'1'}})))
- assert.equal(init.status,200)
- const body=await init.json()
- assert.equal(body.result.protocolVersion,'2025-11-25')
- assert.equal(body.result.serverInfo.name,'cut365')
- assert.equal(init.headers.get('mcp-session-id'),null)
- assert.equal((await handler(request({jsonrpc:'2.0',method:'notifications/initialized'}))).status,202)
- assert.deepEqual((await (await handler(request(rpc('ping')))).json()).result,{})
+ const discovery=await handler(request(rpc('server/discover')))
+ assert.equal(discovery.status,200)
+ const discovered=await discovery.json()
+ assert.ok(discovered.result.supportedVersions.includes(protocolVersion))
+ assert.equal(discovery.headers.get('mcp-session-id'),null)
  const list=await (await handler(request(rpc('tools/list')))).json()
  assert.deepEqual(list.result.tools.map(t=>t.name),['get_today_summary'])
  assert.equal(list.result.tools[0].annotations.readOnlyHint,true)
  const call=await (await handler(request(rpc('tools/call',{name:'get_today_summary',arguments:{}})))).json()
  assert.equal(call.result.structuredContent.status,'alice')
+ const legacy=await handler(request({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'legacy',version:'1'}}},{'mcp-protocol-version':'2025-11-25'}))
+ assert.equal(legacy.status,400)
+ assert.equal((await legacy.json()).error.code,-32022)
 })
 
-test('authentication is required even for discovery, initialization and GET',async()=>{
+test('authentication is required even for discovery and unsupported methods',async()=>{
  const handler=createMcpHandler({log:()=>{}})
  for(const method of ['GET','POST']){
   const res=await handler(new Request('https://cut365.app/api/mcp',{method}))
@@ -48,11 +59,11 @@ test('authentication is required even for discovery, initialization and GET',asy
 
 test('origins, unsupported methods, bad versions and media types are rejected',async()=>{
  const {handler}=setup()
- assert.equal((await handler(request(rpc('ping'),{origin:'https://evil.example'}))).status,403)
+ assert.equal((await handler(request(rpc('tools/list'),{origin:'https://evil.example'}))).status,403)
  for(const method of ['GET','DELETE','PUT','PATCH','OPTIONS'])assert.equal((await handler(new Request('https://cut365.app/api/mcp',{method}))).status,405)
- assert.equal((await handler(request(rpc('ping'),{'mcp-protocol-version':'unsupported'}))).status,400)
- assert.equal((await handler(request(rpc('ping'),{accept:'text/plain'}))).status,406)
- assert.equal((await handler(request(rpc('ping'),{'content-type':'text/plain'}))).status,415)
+ assert.equal((await handler(request(rpc('tools/list'),{'mcp-protocol-version':'unsupported'}))).status,400)
+ assert.equal((await handler(request(rpc('tools/list'),{accept:'text/plain'}))).status,406)
+ assert.equal((await handler(request(rpc('tools/list'),{'content-type':'text/plain'}))).status,415)
 })
 
 test('invalid JSON, oversized bodies and unregistered tools cannot execute domain code',async()=>{
@@ -118,20 +129,29 @@ test('missing profile does not invent a timezone or perform bootstrap writes',as
  assert.equal(queries.length,1)
 })
 
-test('official MCP client connects and calls through Streamable HTTP',async()=>{
- const {Client}=await import('@modelcontextprotocol/sdk/client/index.js')
- const {StreamableHTTPClientTransport}=await import('@modelcontextprotocol/sdk/client/streamableHttp.js')
+test('official MCP client pins 2026-07-28 discovery and never initializes',async()=>{
+ const {Client,StreamableHTTPClientTransport}=await import('@modelcontextprotocol/client')
  const {handler}=setup()
+ const methods:string[]=[]
  const transport=new StreamableHTTPClientTransport(new URL('https://cut365.app/api/mcp'),{
   requestInit:{headers:{authorization:'Bearer example'}},
-  fetch:async(input,init)=>handler(new Request(input,init))
+  fetch:async(input,init)=>{
+   const outgoing=new Request(input,init)
+   const body=await outgoing.clone().json() as {method?:string}
+   if(body.method)methods.push(body.method)
+   return handler(outgoing)
+  }
  })
- const client=new Client({name:'integration-test',version:'1'})
+ const client=new Client({name:'integration-test',version:'1'},{versionNegotiation:{mode:{pin:protocolVersion}}})
  try{
   await client.connect(transport)
+  assert.equal(client.getProtocolEra(),'modern')
+  assert.equal(client.getNegotiatedProtocolVersion(),protocolVersion)
   assert.equal((await client.listTools()).tools.length,1)
   const result=await client.callTool({name:'get_today_summary',arguments:{}})
   assert.equal((result.structuredContent as Record<string,unknown>)?.status,'alice')
+  assert.equal(methods[0],'server/discover')
+  assert.ok(!methods.includes('initialize'))
  }finally{await client.close()}
 })
 
