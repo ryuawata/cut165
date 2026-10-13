@@ -2,6 +2,15 @@ import type {CanonicalFood,CanonicalServing,FoodSearchResult,NutritionProvider} 
 
 type RawFood={food_id?:string|number;food_name?:string;brand_name?:string;food_type?:string;servings?:{serving?:RawServing|RawServing[]}}
 type RawServing={serving_id?:string|number;serving_description?:string;number_of_units?:string;measurement_description?:string;metric_serving_amount?:string;calories?:string;protein?:string;carbohydrate?:string;fat?:string}
+export class NutritionProviderError extends Error{
+ status:number
+ constructor(message:string,status:number){super(message);this.status=status}
+}
+function responseError(stage:'authentication'|'food lookup',status:number){
+ if(status===429)return new NutritionProviderError('FatSecret rate limit reached. Try again shortly.',429)
+ if(status===401||status===403)return new NutritionProviderError(`FatSecret ${stage} was rejected (${status}). Check the Client ID, Client Secret, and API access.`,502)
+ return new NutritionProviderError(`FatSecret ${stage} failed (HTTP ${status}).`,502)
+}
 const list=<T>(value:T|T[]|undefined):T[]=>value===undefined?[]:Array.isArray(value)?value:[value]
 const metric=(value?:string)=>value===undefined?null:Number.isFinite(Number(value))?Number(value):null
 function normalizeServing(raw:RawServing,index:number):CanonicalServing{
@@ -19,18 +28,22 @@ export class FatSecretNutritionProvider implements NutritionProvider{
   const id=process.env.FATSECRET_CLIENT_ID,key=process.env.FATSECRET_CLIENT_SECRET
   if(!id||!key)throw new Error('Nutrition provider is not configured.')
   const response=await fetch('https://oauth.fatsecret.com/connect/token',{method:'POST',headers:{Authorization:`Basic ${Buffer.from(`${id}:${key}`).toString('base64')}`,'Content-Type':'application/x-www-form-urlencoded'},body:'grant_type=client_credentials&scope=basic',cache:'no-store'})
-  if(!response.ok)throw new Error(response.status===429?'Nutrition provider is rate limited.':'Nutrition provider is unavailable.')
+  if(!response.ok)throw responseError('authentication',response.status)
   const data=await response.json() as {access_token?:string;expires_in?:number}
-  if(!data.access_token)throw new Error('Nutrition provider is unavailable.')
+  if(!data.access_token)throw new NutritionProviderError('FatSecret did not return an access token.',502)
   this.token=data.access_token;this.expires=Date.now()+Math.max(0,(data.expires_in??3600)-60)*1000
   return this.token
  }
  private async call(method:string,params:Record<string,string>){
   const body=new URLSearchParams({method,format:'json',...params})
   const response=await fetch('https://platform.fatsecret.com/rest/server.api',{method:'POST',headers:{Authorization:`Bearer ${await this.accessToken()}`,'Content-Type':'application/x-www-form-urlencoded'},body,cache:'no-store'})
-  if(!response.ok)throw new Error(response.status===429?'Nutrition provider is rate limited.':'Nutrition provider is unavailable.')
-  const data=await response.json() as {error?:{message?:string};foods?:{food?:RawFood|RawFood[]};food?:RawFood}
-  if(data.error)throw new Error('Nutrition provider is unavailable.')
+  if(!response.ok)throw responseError('food lookup',response.status)
+  const data=await response.json() as {error?:{code?:string|number};foods?:{food?:RawFood|RawFood[]};food?:RawFood}
+  if(data.error){
+   const code=data.error.code
+   const suffix=typeof code==='number'||typeof code==='string'&&/^\d{1,4}$/.test(code)?` (code ${code})`:''
+   throw new NutritionProviderError(`FatSecret rejected the food lookup${suffix}.`,502)
+  }
   return data
  }
  async searchFoods(query:string){

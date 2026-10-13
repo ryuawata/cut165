@@ -4,6 +4,7 @@ import {getNutritionProvider} from '../../../lib/nutrition-provider/index.ts'
 import {calculateFood,resolveMeal} from '../../../lib/nutrition-provider/resolve.ts'
 import {calendarDateInTimezone} from '../../../lib/targets.ts'
 import {createNutritionEntry} from '../../../lib/nutrition.ts'
+import {NutritionProviderError} from '../../../lib/nutrition-provider/fatsecret.ts'
 
 const selection=z.object({foodId:z.string().min(1),servingId:z.string().min(1),quantity:z.number().positive(),unit:z.enum(['g','oz','piece','serving'])}).strict()
 const requestSchema=z.discriminatedUnion('action',[
@@ -48,6 +49,7 @@ export async function POST(request:Request){
   return Response.json({saved})
  }catch(error){
   if(error instanceof NutritionChatAccessError)return Response.json({error:error.message},{status:error.status})
+  if(error instanceof NutritionProviderError)return Response.json({error:error.message},{status:error.status})
   if(error instanceof z.ZodError)return Response.json({error:'Check the food and quantity.'},{status:400})
   const message=error instanceof Error?error.message:'Could not process food.'
   return Response.json({error:message},{status:400})

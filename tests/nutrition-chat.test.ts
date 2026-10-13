@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {parseMeal,resolveMeal,calculateFood} from '../lib/nutrition-provider/resolve.ts'
 import type {NutritionProvider,CanonicalFood} from '../lib/nutrition-provider/types.ts'
-import {FatSecretNutritionProvider} from '../lib/nutrition-provider/fatsecret.ts'
+import {FatSecretNutritionProvider,NutritionProviderError} from '../lib/nutrition-provider/fatsecret.ts'
 
 test('parses foods and amounts without trusting a calorie claim',()=>{
  assert.deepEqual(parseMeal('I ate 3 Bibigo beef soup dumplings and 300g grilled chicken breast'),[
@@ -38,4 +38,24 @@ test('FatSecret normalizes its response at the provider boundary',async()=>{
   assert.equal(result.servings[0].protein_g,31)
   assert.equal(result.servings[0].grams,100)
  }finally{globalThis.fetch=original;process.env.FATSECRET_CLIENT_ID=originalId;process.env.FATSECRET_CLIENT_SECRET=originalSecret}
+})
+
+test('FatSecret reports which request failed without exposing provider response text',async()=>{
+ const original=globalThis.fetch
+ const originalId=process.env.FATSECRET_CLIENT_ID,originalSecret=process.env.FATSECRET_CLIENT_SECRET
+ process.env.FATSECRET_CLIENT_ID='test';process.env.FATSECRET_CLIENT_SECRET='test'
+ try{
+  globalThis.fetch=async()=>new Response('secret diagnostic',{status:401})
+  await assert.rejects(new FatSecretNutritionProvider().searchFoods('chicken'),(error:unknown)=>
+   error instanceof NutritionProviderError&&error.message.includes('authentication was rejected (401)')&&!error.message.includes('secret diagnostic'))
+  globalThis.fetch=async (_input,init)=>String(init?.body??'').includes('grant_type=')
+   ?Response.json({access_token:'fake',expires_in:3600})
+   :Response.json({error:{code:13,message:'secret diagnostic'}})
+  await assert.rejects(new FatSecretNutritionProvider().searchFoods('chicken'),(error:unknown)=>
+   error instanceof NutritionProviderError&&error.message.includes('code 13')&&!error.message.includes('secret diagnostic'))
+ }finally{
+  globalThis.fetch=original
+  if(originalId===undefined)delete process.env.FATSECRET_CLIENT_ID;else process.env.FATSECRET_CLIENT_ID=originalId
+  if(originalSecret===undefined)delete process.env.FATSECRET_CLIENT_SECRET;else process.env.FATSECRET_CLIENT_SECRET=originalSecret
+ }
 })
