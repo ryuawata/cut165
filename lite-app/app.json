@@ -18,6 +18,7 @@
     },
     "plugins": [
       "expo-sqlite"
-    ]
+    ],
+    "icon": "./assets/icon.png"
   }
 }
