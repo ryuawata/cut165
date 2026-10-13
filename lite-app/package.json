@@ -9,7 +9,8 @@
     "check": "tsc --noEmit",
     "doctor": "expo-doctor",
     "build": "eas build --platform ios --profile production",
-    "submit": "eas submit --platform ios --profile production"
+    "submit": "eas submit --platform ios --profile production",
+    "postinstall": "node scripts/make-icon.cjs"
   },
   "dependencies": {
     "expo": "~54.0.0",
