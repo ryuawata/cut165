@@ -1,0 +1,41 @@
+# Release status (2026-10-13)
+
+## Implemented on `lite`
+- Standalone Expo SDK 54 React Native app in `lite-app/`
+- Offline SQLite-backed key/value persistence; serialized saves
+- Manual calorie and protein entry, editing, deletion, daily totals
+- Saved foods and one-tap repeat
+- Daily date navigation/history and editable goals
+- iOS EAS build/submit configuration
+- Draft App Store description and privacy policy
+- Automated dependency and TypeScript checks in GitHub Actions
+
+## Unverified / blocking release
+- Dependency installation and TypeScript checks have not been observed passing.
+- iOS binary has not been compiled or installed on a device.
+- Final production app icon is not supplied (current app config uses Expo default).
+- Apple Developer Program account, payment agreements and signing credentials are not connected.
+- Expo account/EAS project not initialized; `npx eas-cli init` must run using an Expo account.
+- Real screenshots, support/privacy URLs, and App Store Connect submission metadata are not completed.
+- No TestFlight testing or App Review submission has occurred.
+- The bundle identifier `com.cut365.lite` must be confirmed unique and owned before first Apple provisioning.
+
+**Release is NOT verified or ready for submission until blockers are closed.** No claim of successful build or deployment should be made.
+
+## Next actionable terminal commands
+
+```bash
+git checkout lite
+cd lite-app
+npm install
+npx expo install --fix
+npm run check
+npx expo start
+# After manual QA and credentials:
+npx eas-cli login
+npx eas-cli init
+npx eas-cli build --platform ios --profile production
+npx eas-cli submit --platform ios --profile production
+```
+
+Do not commit Apple credentials, authentication tokens, or signing files. Validate actual build output, TestFlight persistence and accessibility before App Store review.
