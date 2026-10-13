@@ -41,6 +41,7 @@ export class FatSecretNutritionProvider implements NutritionProvider{
   const data=await response.json() as {error?:{code?:string|number};foods?:{food?:RawFood|RawFood[]};food?:RawFood}
   if(data.error){
    const code=data.error.code
+   if(Number(code)===21)throw new NutritionProviderError('FatSecret blocked this server IP (code 21). Add the server\'s public outbound IP to the allowed IPs for your FatSecret API key.',502)
    const suffix=typeof code==='number'||typeof code==='string'&&/^\d{1,4}$/.test(code)?` (code ${code})`:''
    throw new NutritionProviderError(`FatSecret rejected the food lookup${suffix}.`,502)
   }

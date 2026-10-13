@@ -53,6 +53,11 @@ test('FatSecret reports which request failed without exposing provider response 
    :Response.json({error:{code:13,message:'secret diagnostic'}})
   await assert.rejects(new FatSecretNutritionProvider().searchFoods('chicken'),(error:unknown)=>
    error instanceof NutritionProviderError&&error.message.includes('code 13')&&!error.message.includes('secret diagnostic'))
+  globalThis.fetch=async (_input,init)=>String(init?.body??'').includes('grant_type=')
+   ?Response.json({access_token:'fake',expires_in:3600})
+   :Response.json({error:{code:21,message:'secret diagnostic'}})
+  await assert.rejects(new FatSecretNutritionProvider().searchFoods('chicken'),(error:unknown)=>
+   error instanceof NutritionProviderError&&error.message.includes('server IP')&&!error.message.includes('secret diagnostic'))
  }finally{
   globalThis.fetch=original
   if(originalId===undefined)delete process.env.FATSECRET_CLIENT_ID;else process.env.FATSECRET_CLIENT_ID=originalId
