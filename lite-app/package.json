@@ -1,0 +1,27 @@
+{
+  "name": "cut365-lite",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo start --ios",
+    "check": "tsc --noEmit",
+    "doctor": "expo-doctor",
+    "build": "eas build --platform ios --profile production",
+    "submit": "eas submit --platform ios --profile production"
+  },
+  "dependencies": {
+    "expo": "~54.0.0",
+    "expo-status-bar": "~3.0.9",
+    "expo-sqlite": "~16.0.10",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-safe-area-context": "~5.6.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.10",
+    "typescript": "~5.9.2",
+    "expo-doctor": "^1.17.0"
+  }
+}
