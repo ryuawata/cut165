@@ -4,6 +4,7 @@ import type {Session} from '@supabase/supabase-js'
 import Onboarding,{type AccountSetup} from './onboarding'
 import GoalSettings,{type SettingsSection} from './goal-settings'
 import NutritionPresets from './nutrition-presets'
+import NutritionChat from './nutrition-chat'
 import CustomWorkoutLauncher from './custom-workout-launcher'
 import PeriodProgressView,{PeriodSharedProgressView} from './period-progress'
 import {supabase} from '../lib/supabase'
@@ -163,6 +164,7 @@ export default function Page(){
  const [nutritionNotice,setNutritionNotice]=useState<{text:string;entryId:string|null;logDate:string}|null>(null)
  const [meal,setMeal]=useState<MealDraft>(blankMeal)
  const [mealOpen,setMealOpen]=useState(false)
+ const [chatOpen,setChatOpen]=useState(false)
  const [editingId,setEditingId]=useState<string|null>(null)
  const [editDraft,setEditDraft]=useState<EditDraft|null>(null)
  const [saveState,setSaveState]=useState<Record<string,string>>({})
@@ -885,6 +887,8 @@ export default function Page(){
    <button type="button" className="primaryFoodAction" onClick={()=>openMealForm()}>+ Add food</button>
   </div>
 
+  <button type="button" className="quiet" onClick={()=>setChatOpen(true)}>Chat food log</button>
+  {chatOpen&&<NutritionChat logDate={selectedDate} onSaved={()=>refreshNutrition(selectedDate)} onClose={()=>setChatOpen(false)}/>}
   <section className="quickAdd oneOffMeal" id="one-off-entry" hidden={!mealOpen}>
     <form className="mealFields" onSubmit={addMeal}>
      <label className="mealDescription"><span>Description</span><input type="text" placeholder="Dinner" value={meal.description} onChange={event=>setMeal({...meal,description:event.target.value})} required/></label>
@@ -989,6 +993,7 @@ export default function Page(){
    <section className="mobileLogSheet" role="dialog" aria-modal="true" aria-labelledby="mobile-log-title">
     <div className="mobileLogHead"><div><p className="eyebrow">{selectedLabel.toUpperCase()}</p><h2 id="mobile-log-title">Log</h2></div><button ref={logCloseRef} type="button" onClick={()=>setLogSheetOpen(false)} aria-label="Close log menu">×</button></div>
     <div className="mobileLogActions">
+     <button type="button" onClick={()=>{setLogSheetOpen(false);chooseMobileDestination('today');setChatOpen(true)}}><MobileNavIcon name="food"/><span>Chat</span></button>
      <button type="button" onClick={()=>openMealForm()}><MobileNavIcon name="food"/><span>Food</span></button>
      <button type="button" onClick={()=>openMealForm('drink')}><MobileNavIcon name="drink"/><span>Drink</span></button>
      <button type="button" onClick={openWaterLog}><MobileNavIcon name="water"/><span>Water</span></button>

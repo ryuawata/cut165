@@ -64,3 +64,10 @@
  .presetQuickAdd{padding-top:21px}.presetRail{display:flex}.presetHead{align-items:end}.presetHead>button{min-height:40px}.nutritionEntries{margin-top:26px;padding-top:21px}
  .entryRowActions button{min-width:58px;min-height:40px}.nutritionEntriesHead{align-items:end}
 }
+.nutritionChat{background:#fff;border:1px solid #e6e7e5;border-radius:20px;padding:20px;margin:16px 0;display:grid;gap:16px}
+.nutritionChatHead,.nutritionChatQuantity{display:flex;justify-content:space-between;gap:12px}
+.nutritionChat form,.nutritionChatChoice,.nutritionChatPreview,.nutritionChat label{display:grid;gap:8px}
+.nutritionChatChoice{border-top:1px solid #e6e7e5;padding-top:16px}
+.nutritionChat textarea,.nutritionChat select,.nutritionChat input{width:100%;min-height:44px;border:1px solid #d4d7d4;border-radius:10px;padding:10px;background:white;font:inherit}
+.nutritionChat button{min-height:44px}
+.nutritionChatQuantity>*{flex:1;min-width:0}
