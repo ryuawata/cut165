@@ -8,7 +8,6 @@
     "userInterfaceStyle": "light",
     "backgroundColor": "#FFFFFF",
     "primaryColor": "#2563EB",
-    "icon": "./assets/icon.png",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.cut365.lite",
@@ -19,9 +18,6 @@
     },
     "plugins": [
       "expo-sqlite"
-    ],
-    "extra": {
-      "eas": {}
-    }
+    ]
   }
 }
