@@ -29,13 +29,17 @@ Nutrition amounts are estimates entered by you. CUT365 Lite is not medical advic
 
 App code does not send nutrition entries to a developer-controlled server, include analytics, or integrate advertising SDKs. If this remains true in the shipped binary, the developer can select **Data Not Collected** in App Store Connect. Confirm by reviewing all dependencies and runtime behavior; do not assume Apple automatically determines the privacy label.
 
-## Public URLs that must go live
+## Public URLs
 
-Apple requires valid public URLs for support and app privacy. Publish `PRIVACY.md` as a public website page and provide an email/contact method. A GitHub repository file is not a substitute for a clear customer support page.
+Use the stable `lite` branch preview pages while preparing the listing:
+- Privacy Policy: `https://cut165-git-lite-ryuawatas-projects.vercel.app/privacy`
+- Support: `https://cut165-git-lite-ryuawatas-projects.vercel.app/support`
+
+Before submission, confirm both URLs are publicly reachable without authentication and keep them stable for customers. The support page currently routes requests to the public GitHub issue tracker, so replace that with a private support channel before launch if you do not want customer reports to be public.
 
 ## Screenshots
 
-Capture *real, running iPhone app* screenshots of Today, Add food, Saved foods, History, and Goals on an Apple-supported screenshot size. Don't fabricate device screenshots or imply features not shipped.
+Capture *real, running iPhone app* screenshots of Today, Add food, Saved foods, History, and Goals. Current App Store Connect requirements call for at least one iPhone screenshot for a Dynamic Island medium display; provide additional screenshots only when they improve the listing. Don't fabricate device screenshots or imply features not shipped.
 
 ## Final test checklist
 
